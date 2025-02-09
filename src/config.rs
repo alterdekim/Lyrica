@@ -1,12 +1,12 @@
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-struct YouTubeConfiguration {
+pub struct YouTubeConfiguration {
     pub user_id: u64
 }
 
 #[derive(Debug, Deserialize)]
-struct SoundCloudConfiguration {
+pub struct SoundCloudConfiguration {
     pub user_id: u64
 }
 

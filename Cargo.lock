@@ -827,8 +827,8 @@ checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 
 [[package]]
 name = "itunesdb"
-version = "0.1.0"
-source = "git+https://gitea.awain.net/alterwain/ITunesDB.git#9e20fe785dc9cd1268641dad9730a8fb3ff246c5"
+version = "0.1.1"
+source = "git+https://gitea.awain.net/alterwain/ITunesDB.git#5a6ca7a9f5eca42959e3498a6eb2700f502b5509"
 dependencies = [
  "bincode",
  "env_logger",
@@ -932,6 +932,7 @@ dependencies = [
  "rusb",
  "serde",
  "soundcloud",
+ "strum 0.27.0",
  "tokio",
  "tokio-util",
  "toml",
@@ -1204,7 +1205,7 @@ dependencies = [
  "itertools",
  "lru",
  "paste",
- "strum",
+ "strum 0.26.3",
  "time",
  "unicode-segmentation",
  "unicode-truncate",
@@ -1562,8 +1563,8 @@ dependencies = [
 
 [[package]]
 name = "soundcloud"
-version = "0.1.0"
-source = "git+https://gitea.awain.net/alterwain/soundcloud_api.git#d4d51c64e9225763f6d40a7f450c673ab6e36ddf"
+version = "0.1.1"
+source = "git+https://gitea.awain.net/alterwain/soundcloud_api.git#87614c2a10c30f7d3e4b3cb0f8973d62ffec7916"
 dependencies = [
  "hyper-util",
  "regex",
@@ -1603,7 +1604,16 @@ version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fec0f0aef304996cf250b31b5a10dee7980c85da9d759361292b8bca5a18f06"
 dependencies = [
- "strum_macros",
+ "strum_macros 0.26.4",
+]
+
+[[package]]
+name = "strum"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ce1475c515a4f03a8a7129bb5228b81a781a86cb0b3fbbc19e1c556d491a401f"
+dependencies = [
+ "strum_macros 0.27.0",
 ]
 
 [[package]]
@@ -1611,6 +1621,19 @@ name = "strum_macros"
 version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4c6bee85a5a24955dc440386795aa378cd9cf82acd5f764469152d2270e581be"
+dependencies = [
+ "heck",
+ "proc-macro2",
+ "quote",
+ "rustversion",
+ "syn",
+]
+
+[[package]]
+name = "strum_macros"
+version = "0.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9688894b43459159c82bfa5a5fa0435c19cbe3c9b427fa1dd7b1ce0c279b18a7"
 dependencies = [
  "heck",
  "proc-macro2",

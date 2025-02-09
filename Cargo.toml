@@ -16,5 +16,6 @@ color-eyre = "0.6.3"
 crossterm = "0.28.1"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7.12", features = ["codec"] }
-soundcloud = { git = "https://gitea.awain.net/alterwain/soundcloud_api.git" }
-itunesdb = { git = "https://gitea.awain.net/alterwain/ITunesDB.git" }
+strum = { version = "0.27", features = ["derive"] }
+soundcloud = { version = "0.1.1", git = "https://gitea.awain.net/alterwain/soundcloud_api.git" }
+itunesdb = { version = "0.1.1", git = "https://gitea.awain.net/alterwain/ITunesDB.git" }

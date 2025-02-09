@@ -1,15 +1,21 @@
 use std::{error::Error, io, path::{Path, PathBuf}};
 
 use color_eyre::Result;
+use config::LyricaConfiguration;
 use crossterm::{event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind}, execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
-use ratatui::{buffer::Buffer, layout::Rect, prelude::{Backend, CrosstermBackend}, style::Stylize, symbols::border, text::{Line, Text}, widgets::{Block, Paragraph, Widget}, DefaultTerminal, Frame, Terminal};
+use ratatui::{buffer::Buffer, layout::{Layout, Rect}, prelude::{Backend, CrosstermBackend}, style::{Color, Stylize}, symbols::border, text::{Line, Text}, widgets::{Block, Paragraph, Tabs, Widget}, DefaultTerminal, Frame, Terminal};
+use screen::MainScreen;
+use soundcloud::sobjects::CloudPlaylists;
+use strum::IntoEnumIterator;
 use tokio::{fs::File, io::AsyncReadExt, sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender}};
 use tokio_util::sync::CancellationToken;
-
 use itunesdb::xobjects::XDatabase;
+use ratatui::prelude::Constraint::{Length, Min};
 
 mod util;
 mod config;
+mod tabs;
+mod screen;
 
 fn get_configs_dir() -> PathBuf {
     let mut p = dirs::home_dir().unwrap();
@@ -20,10 +26,7 @@ fn get_configs_dir() -> PathBuf {
 #[derive(Debug, Clone)]
 enum AppState {
     IPodWait,
-    MainScreen(String),
-    SoundCloud,
-    Youtube,
-    Preferences
+    MainScreen(crate::screen::MainScreen)
 }
 
 enum AppEvent {
@@ -31,7 +34,8 @@ enum AppEvent {
     IPodFound(String),
     IPodNotFound,
     ParseItunes(String),
-    ITunesParsed(XDatabase)
+    ITunesParsed(XDatabase),
+    SoundcloudGot(CloudPlaylists)
 }
 
 fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedReceiver<AppEvent>, token: CancellationToken) {
@@ -44,31 +48,43 @@ fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedReceive
                     if let Some(request) = r {
                         match request {
                             AppEvent::SearchIPod => {
-                                if let Some(p) = util::search_ipod() {
+                                /*if let Some(p) = util::search_ipod() {
                                     let _ = sender.send(AppEvent::IPodFound(p)).await;
                                 } else {
                                     let _ = sender.send(AppEvent::IPodNotFound).await;
-                                }
+                                }*/
+                                let _ = sender.send(AppEvent::IPodFound("D:\\Documents\\RustroverProjects\\itunesdb\\ITunesDB\\two_tracks".to_string())).await;
                             },
                             AppEvent::ParseItunes(path) => {
                                 // todo: parse itunes
                                 let _ = std::fs::create_dir_all(get_configs_dir());
                                 let mut cd = get_configs_dir();
                                 cd.push("idb");
-                                /*let mut p = get_configs_dir();
-                                p.push("config");
-                                p.set_extension(".toml");
-                                p.exists()*/
                                 let mut p: PathBuf = Path::new(&path).into();
-                                p.push("iPod_Control");
-                                p.push("iTunes");
-                                p.set_file_name("iTunesDB");
+                               // p.push("iPod_Control");
+                             //   p.push("iTunes");
+                              //  p.set_file_name("iTunesDB");
                                 let _ = std::fs::copy(p, &cd);
                                 let mut file = File::open(cd).await.unwrap();
                                 let mut contents = vec![];
                                 file.read_to_end(&mut contents).await.unwrap();
                                 let xdb = itunesdb::deserializer::parse_bytes(&contents);
                                 let _ = sender.send(AppEvent::ITunesParsed(xdb)).await;
+
+                                let mut p = get_configs_dir();
+                                p.push("config");
+                                p.set_extension(".toml");
+                                if !p.exists() { return; }
+                                let mut file = File::open(p).await.unwrap();
+                                let mut content = String::new();
+                                file.read_to_string(&mut content).await.unwrap();
+                                let config: LyricaConfiguration = toml::from_str(&content).unwrap();
+                                
+                                let app_version = soundcloud::get_app().await.unwrap().unwrap();
+                                let client_id = soundcloud::get_client_id().await.unwrap().unwrap();
+                                let playlists = soundcloud::get_playlists(config.get_soundcloud().user_id, client_id, app_version).await.unwrap();
+
+                                let _ = sender.send(AppEvent::SoundcloudGot(playlists)).await;
                             },
                             _ => {}
                         }
@@ -121,11 +137,21 @@ impl App {
         if let Ok(event) = self.receiver.try_recv() {
             match event {
                 AppEvent::IPodFound(path) => {
-                    self.state = AppState::MainScreen(path.clone());
+                    self.state = AppState::MainScreen(MainScreen::new());
                     let _ = self.sender.send(AppEvent::ParseItunes(path));
                 },
                 AppEvent::IPodNotFound => {
                     let _ = self.sender.send(AppEvent::SearchIPod);
+                },
+                AppEvent::ITunesParsed(xdb) => {
+
+                },
+                AppEvent::SoundcloudGot(playlists) => {
+                    if let AppState::MainScreen(screen) = &self.state {
+                        let mut screen = screen.clone();
+                        screen.soundcloud = Some(playlists);
+                        self.state = AppState::MainScreen(screen);
+                    }
                 }
                 _ => {}
             }
@@ -134,8 +160,14 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        if key_event.code == KeyCode::Char('q') {
-            self.exit();
+        if let AppState::MainScreen(screen) = &self.state {
+            let mut screen = screen.clone();
+            screen.handle_key_event(key_event);
+            self.state = AppState::MainScreen(screen);
+        }
+        match key_event.code {
+            KeyCode::Char('q') => self.exit(),
+            _ => {}
         }
     }
 
@@ -145,32 +177,17 @@ impl App {
 }
 
 impl AppState {
-    fn render_main_screen(area: Rect, buf: &mut Buffer, path: String) {
-        let title = Line::from(" Lyrica ".bold());
-        let instructions = Line::from(vec![
-            " Quit ".into(),
-            "<Q> ".red().bold(),
-        ]);
-        let block = Block::bordered()
-            .title(title.centered())
-            .title_bottom(instructions.centered())
-            .border_set(border::ROUNDED);
-        
-        let counter_text = Text::from(
-            vec![
-                Line::from(
-                    vec![
-                        "Parsing iTunesDB...".into(),
-                        path.blue().bold()
-                    ]
-                )
-            ]
-        );
+    fn render_main_screen(area: Rect, buf: &mut Buffer, screen: &mut MainScreen) {
+        let vertical = Layout::vertical([Length(1), Min(0), Length(1)]);
+        let [header_area, inner_area, footer_area] = vertical.areas(area);
 
-        Paragraph::new(counter_text)
-            .centered()
-            .block(block)
-            .render(area, buf);
+        let horizontal = Layout::horizontal([Min(0), Length(7)]);
+        let [tabs_area, title_area] = horizontal.areas(header_area);
+
+        MainScreen::render_title(title_area, buf);
+        screen.render_tabs(tabs_area, buf);
+        screen.selected_tab.render(inner_area, buf);
+        MainScreen::render_footer(footer_area, buf);
     }
 
     fn render_waiting_screen(area: Rect, buf: &mut Buffer) {
@@ -205,7 +222,7 @@ impl Widget for AppState {
     fn render(self, area: Rect, buf: &mut Buffer) {
         match self {
             AppState::IPodWait => AppState::render_waiting_screen(area, buf),
-            AppState::MainScreen(s) => AppState::render_main_screen(area, buf, s),
+            AppState::MainScreen(mut s) => AppState::render_main_screen(area, buf, &mut s),
             _ => {}
         }
     }
