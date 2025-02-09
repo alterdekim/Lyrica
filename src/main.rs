@@ -1,12 +1,21 @@
-use std::{error::Error, io};
+use std::{error::Error, io, path::{Path, PathBuf}};
 
 use color_eyre::Result;
 use crossterm::{event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind}, execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
 use ratatui::{buffer::Buffer, layout::Rect, prelude::{Backend, CrosstermBackend}, style::Stylize, symbols::border, text::{Line, Text}, widgets::{Block, Paragraph, Widget}, DefaultTerminal, Frame, Terminal};
-use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
+use tokio::{fs::File, io::AsyncReadExt, sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender}};
 use tokio_util::sync::CancellationToken;
 
+use itunesdb::xobjects::XDatabase;
+
 mod util;
+mod config;
+
+fn get_configs_dir() -> PathBuf {
+    let mut p = dirs::home_dir().unwrap();
+    p.push(".lyrica");
+    p
+}
 
 #[derive(Debug, Clone)]
 enum AppState {
@@ -21,6 +30,8 @@ enum AppEvent {
     SearchIPod,
     IPodFound(String),
     IPodNotFound,
+    ParseItunes(String),
+    ITunesParsed(XDatabase)
 }
 
 fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedReceiver<AppEvent>, token: CancellationToken) {
@@ -38,6 +49,26 @@ fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedReceive
                                 } else {
                                     let _ = sender.send(AppEvent::IPodNotFound).await;
                                 }
+                            },
+                            AppEvent::ParseItunes(path) => {
+                                // todo: parse itunes
+                                let _ = std::fs::create_dir_all(get_configs_dir());
+                                let mut cd = get_configs_dir();
+                                cd.push("idb");
+                                /*let mut p = get_configs_dir();
+                                p.push("config");
+                                p.set_extension(".toml");
+                                p.exists()*/
+                                let mut p: PathBuf = Path::new(&path).into();
+                                p.push("iPod_Control");
+                                p.push("iTunes");
+                                p.set_file_name("iTunesDB");
+                                let _ = std::fs::copy(p, &cd);
+                                let mut file = File::open(cd).await.unwrap();
+                                let mut contents = vec![];
+                                file.read_to_end(&mut contents).await.unwrap();
+                                let xdb = itunesdb::deserializer::parse_bytes(&contents);
+                                let _ = sender.send(AppEvent::ITunesParsed(xdb)).await;
                             },
                             _ => {}
                         }
@@ -90,7 +121,8 @@ impl App {
         if let Ok(event) = self.receiver.try_recv() {
             match event {
                 AppEvent::IPodFound(path) => {
-                    self.state = AppState::MainScreen(path);
+                    self.state = AppState::MainScreen(path.clone());
+                    let _ = self.sender.send(AppEvent::ParseItunes(path));
                 },
                 AppEvent::IPodNotFound => {
                     let _ = self.sender.send(AppEvent::SearchIPod);
@@ -128,7 +160,7 @@ impl AppState {
             vec![
                 Line::from(
                     vec![
-                        "Found iPod...".into(),
+                        "Parsing iTunesDB...".into(),
                         path.blue().bold()
                     ]
                 )

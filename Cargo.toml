@@ -7,6 +7,9 @@ authors = ["Michael Wain <alterwain@protonmail.com>"]
 
 [dependencies]
 rusb = "0.9.4"
+dirs = "6.0.0"
+toml = "0.8.20"
+serde = "1.0.217"
 regex = "1.11.1"
 ratatui = { version = "0.29.0", features = ["all-widgets"] }
 color-eyre = "0.6.3"
