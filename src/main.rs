@@ -1,17 +1,17 @@
-use std::io;
+use std::{error::Error, io};
 
 use color_eyre::Result;
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind};
-use ratatui::{buffer::Buffer, layout::Rect, style::Stylize, symbols::border, text::{Line, Text}, widgets::{Block, Paragraph, Widget}, DefaultTerminal, Frame};
+use crossterm::{event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind}, execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
+use ratatui::{buffer::Buffer, layout::Rect, prelude::{Backend, CrosstermBackend}, style::Stylize, symbols::border, text::{Line, Text}, widgets::{Block, Paragraph, Widget}, DefaultTerminal, Frame, Terminal};
 use tokio::sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
 
 mod util;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 enum AppState {
     IPodWait,
-    MainScreen,
+    MainScreen(String),
     SoundCloud,
     Youtube,
     Preferences
@@ -68,7 +68,7 @@ impl Default for App {
 }
 
 impl App {
-    pub fn run(&mut self, terminal: &mut DefaultTerminal) -> io::Result<()> {
+    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
         while !self.token.is_cancelled() {
             terminal.draw(|frame| self.draw(frame))?;
             self.handle_events()?;
@@ -77,7 +77,7 @@ impl App {
     }
 
     fn draw(&self, frame: &mut Frame) {
-        frame.render_widget(self, frame.area());
+        frame.render_widget(self.state.clone(), frame.area());
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
@@ -90,7 +90,7 @@ impl App {
         if let Ok(event) = self.receiver.try_recv() {
             match event {
                 AppEvent::IPodFound(path) => {
-                    self.state = AppState::MainScreen;
+                    self.state = AppState::MainScreen(path);
                 },
                 AppEvent::IPodNotFound => {
                     let _ = self.sender.send(AppEvent::SearchIPod);
@@ -110,8 +110,38 @@ impl App {
     fn exit(&mut self) {
         self.token.cancel();
     }
+}
 
-    fn render_waiting_screen(&self, area: Rect, buf: &mut Buffer) {
+impl AppState {
+    fn render_main_screen(area: Rect, buf: &mut Buffer, path: String) {
+        let title = Line::from(" Lyrica ".bold());
+        let instructions = Line::from(vec![
+            " Quit ".into(),
+            "<Q> ".red().bold(),
+        ]);
+        let block = Block::bordered()
+            .title(title.centered())
+            .title_bottom(instructions.centered())
+            .border_set(border::ROUNDED);
+        
+        let counter_text = Text::from(
+            vec![
+                Line::from(
+                    vec![
+                        "Found iPod...".into(),
+                        path.blue().bold()
+                    ]
+                )
+            ]
+        );
+
+        Paragraph::new(counter_text)
+            .centered()
+            .block(block)
+            .render(area, buf);
+    }
+
+    fn render_waiting_screen(area: Rect, buf: &mut Buffer) {
         let title = Line::from(" Lyrica ".bold());
         let instructions = Line::from(vec![
             " Quit ".into(),
@@ -139,19 +169,36 @@ impl App {
     }
 }
 
-impl Widget for &App {
+impl Widget for AppState {
     fn render(self, area: Rect, buf: &mut Buffer) {
-        match self.state {
-            AppState::IPodWait => self.render_waiting_screen(area, buf),
+        match self {
+            AppState::IPodWait => AppState::render_waiting_screen(area, buf),
+            AppState::MainScreen(s) => AppState::render_main_screen(area, buf, s),
             _ => {}
         }
     }
 }
 
 #[tokio::main]
-async fn main() -> io::Result<()> {
-    let mut terminal = ratatui::init();
-    let app_result = App::default().run(&mut terminal);
-    ratatui::restore();
-    app_result
+async fn main() -> Result<(), Box<dyn Error>> {
+    enable_raw_mode()?;
+    let mut stderr = io::stderr(); // This is a special case. Normally using stdout is fine
+    execute!(stderr, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stderr);
+    let mut terminal = Terminal::new(backend)?;
+
+    // create app and run it
+    let mut app = App::default();
+    app.run(&mut terminal);
+
+    // restore terminal
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    Ok(())
 }
