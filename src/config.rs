@@ -1,4 +1,12 @@
+use std::path::PathBuf;
+
 use serde::Deserialize;
+
+pub fn get_configs_dir() -> PathBuf {
+    let mut p = dirs::home_dir().unwrap();
+    p.push(".lyrica");
+    p
+}
 
 #[derive(Debug, Deserialize)]
 pub struct YouTubeConfiguration {
