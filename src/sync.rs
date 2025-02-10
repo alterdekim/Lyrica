@@ -2,10 +2,10 @@ use std::path::{Path, PathBuf};
 
 use itunesdb::xobjects::XDatabase;
 use soundcloud::sobjects::CloudPlaylists;
-use tokio::{fs::File, io::AsyncReadExt, sync::mpsc::{Sender, UnboundedReceiver}};
+use tokio::{fs::File, io::{AsyncReadExt, AsyncWriteExt}, sync::mpsc::{Sender, UnboundedReceiver}};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::{get_configs_dir, LyricaConfiguration};
+use crate::config::{get_config_path, get_configs_dir, get_temp_itunesdb, LyricaConfiguration};
 
 pub enum AppEvent {
     SearchIPod,
@@ -36,8 +36,7 @@ pub fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedRec
                             AppEvent::ParseItunes(path) => {
                                 // todo: parse itunes
                                 let _ = std::fs::create_dir_all(get_configs_dir());
-                                let mut cd = get_configs_dir();
-                                cd.push("idb");
+                                let cd = get_temp_itunesdb();
                                 let mut p: PathBuf = Path::new(&path).into();
                                // p.push("iPod_Control");
                              //   p.push("iTunes");
@@ -49,10 +48,13 @@ pub fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedRec
                                 let xdb = itunesdb::deserializer::parse_bytes(&contents);
                                 let _ = sender.send(AppEvent::ITunesParsed(xdb)).await;
 
-                                let mut p = get_configs_dir();
-                                p.push("config");
-                                p.set_extension(".toml");
-                                if !p.exists() { return; }
+                                let p = get_config_path();
+                                if !p.exists() { 
+                                    let config = LyricaConfiguration::default();
+                                    let cfg_str = toml::to_string_pretty(&config).unwrap();
+                                    let mut file = File::create(&p).await.unwrap();
+                                    file.write(cfg_str.as_bytes()).await;
+                                }
                                 let mut file = File::open(p).await.unwrap();
                                 let mut content = String::new();
                                 file.read_to_string(&mut content).await.unwrap();

@@ -11,6 +11,7 @@ use tokio_util::sync::CancellationToken;
 use ratatui::prelude::Constraint::{Length, Min};
 use wait_screen::WaitScreen;
 
+mod dlp;
 mod util;
 mod config;
 mod screen;
