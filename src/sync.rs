@@ -5,7 +5,7 @@ use soundcloud::sobjects::CloudPlaylists;
 use tokio::{fs::File, io::{AsyncReadExt, AsyncWriteExt}, sync::mpsc::{Sender, UnboundedReceiver}};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::{get_config_path, get_configs_dir, get_temp_itunesdb, LyricaConfiguration};
+use crate::{config::{get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration}, dlp::{self, DownloadProgress}};
 
 pub enum AppEvent {
     SearchIPod,
@@ -13,7 +13,10 @@ pub enum AppEvent {
     IPodNotFound,
     ParseItunes(String),
     ITunesParsed(XDatabase),
-    SoundcloudGot(CloudPlaylists)
+    SoundcloudGot(CloudPlaylists),
+    DownloadPlaylist(String),
+    CurrentProgress(DownloadProgress),
+    OverallProgress((u32, u32))
 }
 
 pub fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedReceiver<AppEvent>, token: CancellationToken) {
@@ -66,6 +69,9 @@ pub fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedRec
 
                                 let _ = sender.send(AppEvent::SoundcloudGot(playlists)).await;
                             },
+                            AppEvent::DownloadPlaylist(playlist_url) => {
+                                let _ = dlp::download_from_soundcloud(&playlist_url, &get_temp_dl_dir(), sender.clone()).await;
+                            }
                             _ => {}
                         }
                     }

@@ -984,6 +984,7 @@ dependencies = [
  "regex",
  "rusb",
  "serde",
+ "serde_json",
  "soundcloud",
  "strum 0.27.0",
  "tokio",

@@ -1,13 +1,32 @@
-use std::path::PathBuf;
+use std::{path::PathBuf, process::Stdio};
 
-use tokio::process::Command;
+use regex::Regex;
+use serde::Deserialize;
+use tokio::{io::{AsyncBufReadExt, BufReader}, process::Command, sync::mpsc::Sender};
 
-pub async fn download_from_soundcloud(playlist_url: &str, download_dir: &PathBuf) -> std::result::Result<(), Box<dyn std::error::Error>> {
+use crate::sync::AppEvent;
+
+#[derive(Debug, Deserialize)]
+pub struct DownloadProgress {
+    progress_percentage: String,
+    progress_total: String,
+    speed: String, 
+    eta: String
+}
+
+pub async fn download_from_soundcloud(playlist_url: &str, download_dir: &PathBuf, sender: Sender<AppEvent>) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let dl_rx: Regex = Regex::new(r"\[download\] Downloading item \d+ of \d+").unwrap();
+
+    if download_dir.exists() {
+        let _ = std::fs::remove_dir_all(download_dir);
+    }
+    let _ = std::fs::create_dir_all(download_dir);
+
     let args = &[
             "--ignore-errors", 
             "--newline", 
             "--progress-template", 
-            "{\"progressPercentage\":\"%(progress._percent_str)s\",\"progressTotal\":\"%(progress._total_bytes_str)s\",\"speed\":\"%(progress._speed_str)s\",\"ETA\":\"%(progress._eta_str)s\"}", 
+            "{\"progress_percentage\":\"%(progress._percent_str)s\",\"progress_total\":\"%(progress._total_bytes_str)s\",\"speed\":\"%(progress._speed_str)s\",\"eta\":\"%(progress._eta_str)s\"}", 
             "-o", 
             "%(id)i.%(ext)s", 
             "--write-thumbnail", 
@@ -16,13 +35,34 @@ pub async fn download_from_soundcloud(playlist_url: &str, download_dir: &PathBuf
 
     let mut command = Command::new("yt-dlp");
     command.args(args);
+    command.stdout(Stdio::piped());
+    command.stderr(Stdio::null());
     command.current_dir(download_dir);
 
     let mut child = command.spawn()?;
 
-    let mut stdout = Vec::new();
-    let child_stdout = child.stdout.take();
-    tokio::io::copy(&mut child_stdout.unwrap(), &mut stdout).await.unwrap();
+    
+    let stdout = child.stdout.take().unwrap();
+    let mut reader = BufReader::new(stdout).lines();
+
+    while let Some(line) = reader.next_line().await? {
+        match dl_rx.find(&line) {
+            Some(m) => {
+                let mut s = m.as_str();
+                s = s.split("Downloading item ").last().unwrap();
+                let s: Vec<&str> = s.split(' ').collect();
+                let cur = s.first().unwrap().trim().parse().unwrap();
+                let max = s.last().unwrap().trim().parse().unwrap();
+                let _ = sender.send(AppEvent::OverallProgress((cur, max))).await;
+            },
+            None => {
+                if line.starts_with("{") {
+                    let progress: DownloadProgress = serde_json::from_str(&line).unwrap();
+                    let _ = sender.send(AppEvent::CurrentProgress(progress)).await;
+                }
+            }
+        }
+    }
 
     Ok(())
 }

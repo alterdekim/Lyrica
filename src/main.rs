@@ -35,7 +35,7 @@ pub struct App {
 
 impl Default for App {
     fn default() -> Self {
-        let (tx, mut rx) = mpsc::channel(1);
+        let (tx, mut rx) = mpsc::channel(10);
         let (jx, mut jr) = mpsc::unbounded_channel();
         let token = CancellationToken::new();
 
@@ -45,7 +45,7 @@ impl Default for App {
         
         let mut screens: HashMap<AppState, Box<dyn AppScreen>> = HashMap::new();
         screens.insert(AppState::IPodWait, Box::new(WaitScreen::default()));
-        screens.insert(AppState::MainScreen, Box::new(MainScreen::new()));
+        screens.insert(AppState::MainScreen, Box::new(MainScreen::new(jx.clone())));
 
         Self { receiver: rx, sender: jx, token, state: AppState::IPodWait, screens }
     }
@@ -65,12 +65,6 @@ impl App {
     }
 
     fn handle_events(&mut self) -> io::Result<()> {
-        match event::read()? {
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
-            }
-            _ => {}
-        };
         if let Ok(event) = self.receiver.try_recv() {
             match event {
                 AppEvent::IPodFound(path) => {
@@ -85,15 +79,24 @@ impl App {
                 },
                 AppEvent::SoundcloudGot(playlists) => {
                     let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
-                    let screen: &mut MainScreen = match a.as_any().downcast_mut::<MainScreen>() {
-                        Some(b) => b,
-                        None => panic!("&a isn't a B!"),
-                    };
+                    let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
                     screen.soundcloud = Some(playlists);
+                },
+                AppEvent::OverallProgress((c, max)) => {
+                    let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
+                    let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
+                    screen.progress = Some((c, max));
+                    screen.download_screen();
                 }
                 _ => {}
             }
-        }
+        };
+        match event::read()? {
+            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                self.handle_key_event(key_event)
+            }
+            _ => {}
+        };
         Ok(())
     }
 
