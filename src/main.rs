@@ -1,7 +1,8 @@
 use std::{any::Any, cell::RefCell, collections::HashMap, error::Error, io, ops::Deref, path::{Path, PathBuf}};
 
 use color_eyre::Result;
-use crossterm::{event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEvent, KeyEventKind}, execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
+use crossterm::{event::{self, DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent, KeyEventKind}, execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
+use futures::StreamExt;
 use ratatui::{buffer::Buffer, layout::{Layout, Rect}, prelude::{Backend, CrosstermBackend}, style::{Color, Stylize}, symbols::border, text::{Line, Text}, widgets::{Block, Paragraph, Tabs, Widget}, DefaultTerminal, Frame, Terminal};
 use main_screen::MainScreen;
 use screen::AppScreen;
@@ -52,10 +53,11 @@ impl Default for App {
 }
 
 impl App {
-    pub fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
+    pub async fn run<B: Backend>(&mut self, terminal: &mut Terminal<B>) -> io::Result<()> {
+        let mut reader = EventStream::new();
         while !self.token.is_cancelled() {
+            let _ = self.handle_events(&mut reader).await;
             terminal.draw(|frame| self.draw(frame))?;
-            self.handle_events()?;
         }
         Ok(())
     }
@@ -64,40 +66,43 @@ impl App {
         self.screens.get(&self.state).unwrap().render(frame);
     }
 
-    fn handle_events(&mut self) -> io::Result<()> {
-        if let Ok(event) = self.receiver.try_recv() {
-            match event {
-                AppEvent::IPodFound(path) => {
-                    self.state = AppState::MainScreen;
-                    let _ = self.sender.send(AppEvent::ParseItunes(path));
-                },
-                AppEvent::IPodNotFound => {
-                    let _ = self.sender.send(AppEvent::SearchIPod);
-                },
-                AppEvent::ITunesParsed(xdb) => {
-
-                },
-                AppEvent::SoundcloudGot(playlists) => {
-                    let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
-                    let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
-                    screen.soundcloud = Some(playlists);
-                },
-                AppEvent::OverallProgress((c, max)) => {
-                    let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
-                    let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
-                    screen.progress = Some((c, max));
-                    screen.download_screen();
+    async fn handle_events(&mut self, reader: &mut EventStream) {
+        tokio::select! {
+            Some(Ok(event)) = reader.next() => {
+                match event {
+                    Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                        self.handle_key_event(key_event);
+                    }
+                    _ => {}
                 }
-                _ => {}
+            },
+            Some(event) = self.receiver.recv() => {
+                match event {
+                    AppEvent::IPodFound(path) => {
+                        self.state = AppState::MainScreen;
+                        let _ = self.sender.send(AppEvent::ParseItunes(path));
+                    },
+                    AppEvent::IPodNotFound => {
+                        let _ = self.sender.send(AppEvent::SearchIPod);
+                    },
+                    AppEvent::ITunesParsed(xdb) => {
+    
+                    },
+                    AppEvent::SoundcloudGot(playlists) => {
+                        let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
+                        let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
+                        screen.soundcloud = Some(playlists);
+                    },
+                    AppEvent::OverallProgress((c, max)) => {
+                        let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
+                        let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
+                        screen.progress = Some((c, max));
+                        screen.download_screen();
+                    }
+                    _ => {}
+                }
             }
-        };
-        match event::read()? {
-            Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
-                self.handle_key_event(key_event)
-            }
-            _ => {}
-        };
-        Ok(())
+        }
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
@@ -123,7 +128,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // create app and run it
     let mut app = App::default();
-    app.run(&mut terminal);
+    let _ = app.run(&mut terminal).await;
 
     // restore terminal
     disable_raw_mode()?;
