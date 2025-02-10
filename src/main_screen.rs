@@ -1,20 +1,26 @@
 use chrono::{DateTime, Utc};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::{buffer::Buffer, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span}, widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Row, Table, Tabs, Widget}, Frame};
+use rascii_art::{charsets, render_image_to, render_to, RenderOptions};
+use ratatui::{buffer::Buffer, layout::{Constraint, Direction, Layout, Rect}, style::{Color, Modifier, Style, Stylize}, text::{Line, Span, Text}, widgets::{Block, Borders, Gauge, List, ListItem, Paragraph, Row, Table, Tabs, Widget}, Frame};
 use soundcloud::sobjects::CloudPlaylists;
 use strum::IntoEnumIterator;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{config::get_temp_dl_dir, dlp, screen::AppScreen, sync::AppEvent};
+use crate::{screen::AppScreen, sync::AppEvent};
 
-#[derive(Debug, Clone)]
+struct Playlist {
+    name: String,
+    thumbnail_url: String,
+    link: String
+}
+
 pub struct MainScreen {
     selected_tab: i8,
     selected_row: i32,
     max_rows: i32,
     tab_titles: Vec<String>,
-    pub soundcloud: Option<CloudPlaylists>,
+    soundcloud: Option<Vec<Playlist>>,
     pub progress: Option<(u32, u32)>,
     sender: UnboundedSender<AppEvent>
 }
@@ -52,7 +58,8 @@ impl AppScreen for MainScreen {
         frame.render_widget(tabs, chunks[0]);
 
         if self.selected_tab != -1 {
-            frame.render_widget(self.render_tab(), chunks[1]);  // Render into second chunk
+            //frame.render_widget(self.render_tab(), chunks[1]);
+            self.render_tab(frame, chunks[1]);
         } else {
             self.render_progress(frame, chunks[1]);
         }
@@ -91,7 +98,7 @@ impl MainScreen {
 
     fn update_max_rows(&mut self) {
         self.max_rows = match self.selected_tab {
-            1 => self.soundcloud.as_ref().unwrap_or( &CloudPlaylists { collection: Vec::new() }).collection.len(),
+            1 => self.soundcloud.as_deref().unwrap_or( &[]).len(),
             _ => 0
         }.try_into().unwrap();
     }
@@ -117,11 +124,35 @@ impl MainScreen {
     fn download_row(&mut self) {
         match self.selected_tab {
             1 => {// SC
-                let playlist_url = self.soundcloud.as_ref().unwrap().collection.get(self.selected_row as usize).unwrap().permalink_url.clone();
+                let playlist_url = self.soundcloud.as_ref().unwrap().get(self.selected_row as usize).unwrap().link.clone();
                 let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist_url));
             },
             _ => {}
         }
+    }
+
+    pub fn set_soundcloud_playlists(&mut self, pl: CloudPlaylists) {
+        self.soundcloud = Some(
+            pl.collection.iter().map(|p| Playlist { name: p.title.clone(), thumbnail_url: p.artwork_url.as_deref().map_or(String::new(), |u| self.ascii_art_from_url(&u)), link: p.permalink_url.clone() }).collect()
+        );
+    }
+
+    fn ascii_art_from_url(&self, url: &str) -> String {
+        let mut buf = String::new();
+        let img = image::load_from_memory(&ureq::get(url).call().unwrap().body_mut().read_to_vec().unwrap() ).unwrap();
+        render_image_to(
+            &img,
+            &mut buf,
+            &RenderOptions {
+                width: Some(16),
+                height: Some(16),
+                colored: true, // true
+                invert: false,
+                charset: charsets::BLOCK // BLOCK
+            })
+        .unwrap();
+
+        buf
     }
 
     fn render_progress(&self, frame: &mut Frame, area: Rect) {
@@ -147,10 +178,10 @@ impl MainScreen {
         frame.render_widget(gauge, chunks[1]);
     }
 
-    fn render_tab(&self) -> Table<'_> {
+    fn render_tab(&self, frame: &mut Frame, area: Rect) /*-> Table<'_>*/ {
         let rows = match self.selected_tab {
             1 => { // SC
-                let mut v = Vec::new();
+                /*let mut v = Vec::new();
                 v.push(Row::new(vec!["Id", "Title", "Songs Count", "Date", "IS"]).style(Style::default().fg(Color::Gray)));
                 if let Some(s) = &self.soundcloud {
                     for (i, playlist) in (&s.collection).iter().enumerate() {
@@ -170,13 +201,44 @@ impl MainScreen {
                         v.push(row);
                     }
                 }
-                v
+                v*/
+                let v = self.soundcloud.as_deref().unwrap_or(&[]);
+                
+
+                let rows = Layout::default()
+                    .direction(Direction::Vertical)
+                    .constraints(vec![Constraint::Percentage(100); math::round::ceil(v.len() as f64 / 3 as f64, 0) as usize]) // Two rows
+                    .split(area);
+
+                for (i, row) in rows.iter().enumerate() {
+                    let cols = Layout::default()
+                        .direction(Direction::Horizontal)
+                        .constraints(vec![Constraint::Length(16); 2]) // Three columns
+                        .split(*row);
+            
+                    for (j, col) in cols.iter().enumerate() {
+                        let index = i * 3 + j;
+                        if index < v.len() {
+                            let p = &v[index];
+
+                            let url_cl = p.thumbnail_url.clone();
+                            let mut s = url_cl.lines().map(|l| Line::from(l)).collect::<Vec<Line>>();
+
+                            let paragraph = Paragraph::new(s)
+                                .block(Block::default().borders(Borders::ALL))
+                                .style(Style::default());
+            
+                            
+                            frame.render_widget(paragraph, *col);
+                        }
+                    }
+                }
             }
-            _ => Vec::new()
+            _ => {} // Vec::new()
         };
 
         // Create the table
-        Table::new(rows, &[
+       /* Table::new(rows, &[
                 Constraint::Length(3),   // ID column
                 Constraint::Percentage(50), // Playlist name column
                 Constraint::Percentage(20), // Song count column
@@ -184,6 +246,6 @@ impl MainScreen {
                 Constraint::Length(2)
             ])
             .block(Block::default().borders(Borders::ALL).title(" Playlists "))
-            .style(Style::default().fg(Color::White))
+            .style(Style::default().fg(Color::White))  */ 
     }
 }

@@ -91,7 +91,7 @@ impl App {
                     AppEvent::SoundcloudGot(playlists) => {
                         let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
                         let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
-                        screen.soundcloud = Some(playlists);
+                        screen.set_soundcloud_playlists(playlists);
                     },
                     AppEvent::OverallProgress((c, max)) => {
                         let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
