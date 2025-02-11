@@ -27,25 +27,34 @@ pub fn get_temp_itunesdb() -> PathBuf {
     p
 }
 
+pub fn get_db() -> PathBuf {
+    let mut p = get_configs_dir();
+    p.push("data.redb");
+    p
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 pub struct YouTubeConfiguration {
-    pub user_id: u64
+    pub user_id: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct SoundCloudConfiguration {
-    pub user_id: u64
+    pub user_id: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct LyricaConfiguration {
     soundcloud: SoundCloudConfiguration,
-    youtube: YouTubeConfiguration
+    youtube: YouTubeConfiguration,
 }
 
 impl Default for LyricaConfiguration {
     fn default() -> Self {
-        Self { soundcloud: SoundCloudConfiguration { user_id: 0 }, youtube: YouTubeConfiguration { user_id: 0 } }
+        Self {
+            soundcloud: SoundCloudConfiguration { user_id: 0 },
+            youtube: YouTubeConfiguration { user_id: 0 },
+        }
     }
 }
 

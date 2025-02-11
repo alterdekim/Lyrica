@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 use wait_screen::WaitScreen;
 
 mod config;
+mod db;
 mod dlp;
 mod main_screen;
 mod screen;

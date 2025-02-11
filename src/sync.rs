@@ -11,7 +11,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     config::{
-        get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration,
+        get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb,
+        LyricaConfiguration,
     },
     dlp::{self, DownloadProgress},
 };
@@ -34,7 +35,10 @@ pub fn initialize_async_service(
     token: CancellationToken,
 ) {
     tokio::spawn(async move {
+        let _ = std::fs::create_dir_all(get_configs_dir());
+
         let mut receiver = receiver;
+
         loop {
             tokio::select! {
                 _ = token.cancelled() => { return; }
@@ -51,7 +55,6 @@ pub fn initialize_async_service(
                             },
                             AppEvent::ParseItunes(path) => {
                                 // todo: parse itunes
-                                let _ = std::fs::create_dir_all(get_configs_dir());
                                 let cd = get_temp_itunesdb();
                                 let p: PathBuf = Path::new(&path).into();
                                // p.push("iPod_Control");
