@@ -2,19 +2,27 @@ use std::{path::PathBuf, process::Stdio};
 
 use regex::Regex;
 use serde::Deserialize;
-use tokio::{io::{AsyncBufReadExt, BufReader}, process::Command, sync::mpsc::Sender};
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    process::Command,
+    sync::mpsc::Sender,
+};
 
 use crate::sync::AppEvent;
 
 #[derive(Debug, Deserialize)]
 pub struct DownloadProgress {
-    progress_percentage: String,
-    progress_total: String,
-    speed: String, 
-    eta: String
+    pub progress_percentage: String,
+    pub progress_total: String,
+    pub speed: String,
+    pub eta: String,
 }
 
-pub async fn download_from_soundcloud(playlist_url: &str, download_dir: &PathBuf, sender: Sender<AppEvent>) -> std::result::Result<(), Box<dyn std::error::Error>> {
+pub async fn download_from_soundcloud(
+    playlist_url: &str,
+    download_dir: &PathBuf,
+    sender: Sender<AppEvent>,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
     let dl_rx: Regex = Regex::new(r"\[download\] Downloading item \d+ of \d+").unwrap();
 
     if download_dir.exists() {
@@ -23,6 +31,8 @@ pub async fn download_from_soundcloud(playlist_url: &str, download_dir: &PathBuf
     let _ = std::fs::create_dir_all(download_dir);
 
     let args = &[
+            "-f",
+            "mp3",
             "--ignore-errors", 
             "--newline", 
             "--progress-template", 
@@ -41,7 +51,6 @@ pub async fn download_from_soundcloud(playlist_url: &str, download_dir: &PathBuf
 
     let mut child = command.spawn()?;
 
-    
     let stdout = child.stdout.take().unwrap();
     let mut reader = BufReader::new(stdout).lines();
 
@@ -54,7 +63,7 @@ pub async fn download_from_soundcloud(playlist_url: &str, download_dir: &PathBuf
                 let cur = s.first().unwrap().trim().parse().unwrap();
                 let max = s.last().unwrap().trim().parse().unwrap();
                 let _ = sender.send(AppEvent::OverallProgress((cur, max))).await;
-            },
+            }
             None => {
                 if line.starts_with("{") {
                     let progress: DownloadProgress = serde_json::from_str(&line).unwrap();

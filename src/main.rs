@@ -25,7 +25,6 @@ use wait_screen::WaitScreen;
 mod config;
 mod dlp;
 mod main_screen;
-mod playlist_icon;
 mod screen;
 mod sync;
 mod util;
@@ -115,7 +114,13 @@ impl App {
                         let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
                         screen.progress = Some((c, max));
                         screen.download_screen();
-                    }
+                    },
+                    AppEvent::CurrentProgress(progress) => {
+                        let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
+                        let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
+                        screen.s_progress = Some(progress);
+                        screen.download_screen();
+                    },
                     _ => {}
                 }
             }

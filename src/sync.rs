@@ -2,10 +2,19 @@ use std::path::{Path, PathBuf};
 
 use itunesdb::xobjects::XDatabase;
 use soundcloud::sobjects::CloudPlaylists;
-use tokio::{fs::File, io::{AsyncReadExt, AsyncWriteExt}, sync::mpsc::{Sender, UnboundedReceiver}};
+use tokio::{
+    fs::File,
+    io::{AsyncReadExt, AsyncWriteExt},
+    sync::mpsc::{Sender, UnboundedReceiver},
+};
 use tokio_util::sync::CancellationToken;
 
-use crate::{config::{get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration}, dlp::{self, DownloadProgress}};
+use crate::{
+    config::{
+        get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration,
+    },
+    dlp::{self, DownloadProgress},
+};
 
 pub enum AppEvent {
     SearchIPod,
@@ -16,10 +25,14 @@ pub enum AppEvent {
     SoundcloudGot(CloudPlaylists),
     DownloadPlaylist(String),
     CurrentProgress(DownloadProgress),
-    OverallProgress((u32, u32))
+    OverallProgress((u32, u32)),
 }
 
-pub fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedReceiver<AppEvent>, token: CancellationToken) {
+pub fn initialize_async_service(
+    sender: Sender<AppEvent>,
+    receiver: UnboundedReceiver<AppEvent>,
+    token: CancellationToken,
+) {
     tokio::spawn(async move {
         let mut receiver = receiver;
         loop {
@@ -52,7 +65,7 @@ pub fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedRec
                                 let _ = sender.send(AppEvent::ITunesParsed(xdb)).await;
 
                                 let p = get_config_path();
-                                if !p.exists() { 
+                                if !p.exists() {
                                     let config = LyricaConfiguration::default();
                                     let cfg_str = toml::to_string_pretty(&config).unwrap();
                                     let mut file = File::create(&p).await.unwrap();
@@ -62,7 +75,7 @@ pub fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedRec
                                 let mut content = String::new();
                                 file.read_to_string(&mut content).await.unwrap();
                                 let config: LyricaConfiguration = toml::from_str(&content).unwrap();
-                                
+
                                 let app_version = soundcloud::get_app().await.unwrap().unwrap();
                                 let client_id = soundcloud::get_client_id().await.unwrap().unwrap();
                                 let playlists = soundcloud::get_playlists(config.get_soundcloud().user_id, client_id, app_version).await.unwrap();
@@ -70,7 +83,9 @@ pub fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedRec
                                 let _ = sender.send(AppEvent::SoundcloudGot(playlists)).await;
                             },
                             AppEvent::DownloadPlaylist(playlist_url) => {
-                                let _ = dlp::download_from_soundcloud(&playlist_url, &get_temp_dl_dir(), sender.clone()).await;
+                                if let Ok(()) = dlp::download_from_soundcloud(&playlist_url, &get_temp_dl_dir(), sender.clone()).await {
+                                    // TODO: sync with db
+                                }
                             }
                             _ => {}
                         }

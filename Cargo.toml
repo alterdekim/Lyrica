@@ -23,8 +23,7 @@ tokio-util = { version = "0.7.12", features = ["codec"] }
 strum = { version = "0.27", features = ["derive"] }
 soundcloud = { version = "0.1.4", git = "https://gitea.awain.net/alterwain/soundcloud_api.git" }
 itunesdb = { version = "0.1.1", git = "https://gitea.awain.net/alterwain/ITunesDB.git" }
-throbber-widgets-tui = "0.8.0"
-image = { version = "0.24.9", default-features = false, features = ["jpeg", "png"] }
 ureq = "3.0.5"
-rascii_art = "0.4.5"
 color-thief = "0.2"
+diesel = { version = "2.2.7", features = ["sqlite", "returning_clauses_for_sqlite_3_35"] }
+dotenvy = "0.15"

@@ -12,7 +12,7 @@ use soundcloud::sobjects::CloudPlaylists;
 use strum::IntoEnumIterator;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{screen::AppScreen, sync::AppEvent};
+use crate::{dlp::DownloadProgress, screen::AppScreen, sync::AppEvent};
 
 struct Playlist {
     id: u64,
@@ -29,6 +29,7 @@ pub struct MainScreen {
     tab_titles: Vec<String>,
     soundcloud: Option<Vec<Playlist>>,
     pub progress: Option<(u32, u32)>,
+    pub s_progress: Option<DownloadProgress>,
     sender: UnboundedSender<AppEvent>,
 }
 
@@ -71,11 +72,9 @@ impl AppScreen for MainScreen {
 
         frame.render_widget(tabs, chunks[0]);
 
-        if self.selected_tab != -1 {
-            //frame.render_widget(self.render_tab(), chunks[1]);
-            self.render_tab(frame, chunks[1]);
-        } else {
-            self.render_progress(frame, chunks[1]);
+        match self.selected_tab {
+            -1 => self.render_progress(frame, chunks[1]),
+            _ => self.render_tab(frame, chunks[1]),
         }
 
         // Render Status Bar
@@ -106,6 +105,7 @@ impl MainScreen {
             max_rows: 0,
             soundcloud: None,
             progress: None,
+            s_progress: None,
             selected_tab: 0,
             tab_titles: vec![
                 "YouTube".to_string(),
@@ -131,6 +131,9 @@ impl MainScreen {
     }
 
     fn next_tab(&mut self) {
+        if self.selected_tab < 0 {
+            return;
+        }
         self.selected_tab = std::cmp::min(
             self.selected_tab + 1,
             (self.tab_titles.len() - 1).try_into().unwrap(),
@@ -139,6 +142,9 @@ impl MainScreen {
     }
 
     fn previous_tab(&mut self) {
+        if self.selected_tab < 0 {
+            return;
+        }
         self.selected_tab = std::cmp::max(0, self.selected_tab - 1);
         self.update_max_rows();
     }
@@ -186,12 +192,16 @@ impl MainScreen {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Min(0),    // Main content
-                Constraint::Length(3), // Progress bar
+                Constraint::Length(6), // Progress bar
+                Constraint::Length(6), // Progress bar
             ])
             .split(area);
 
-        let main_content = Paragraph::new("Main content goes here!")
-            .block(Block::default().borders(Borders::ALL).title("Main"));
+        let main_content = Paragraph::new("Please wait").block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title("Downloading has started!"),
+        );
 
         frame.render_widget(main_content, chunks[0]);
 
@@ -210,6 +220,31 @@ impl MainScreen {
             ));
 
         frame.render_widget(gauge, chunks[1]);
+
+        if self.s_progress.is_none() {
+            return;
+        }
+
+        let s: String = self
+            .s_progress
+            .as_ref()
+            .unwrap()
+            .progress_percentage
+            .chars()
+            .filter(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
+        let ratio: f64 = s.parse::<f64>().unwrap_or(0.0);
+
+        let gauge = Gauge::default()
+            .block(Block::default().borders(Borders::ALL).title(format!(
+                " Downloading Item (ETA: {}) ",
+                self.s_progress.as_ref().unwrap().eta
+            )))
+            .gauge_style(Style::default().fg(Color::Green))
+            .ratio(ratio / 100.0)
+            .label(self.s_progress.as_ref().unwrap().progress_total.to_string());
+
+        frame.render_widget(gauge, chunks[2]);
     }
 
     fn render_tab(&self, frame: &mut Frame, area: Rect) /*-> Table<'_>*/
