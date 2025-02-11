@@ -1,22 +1,25 @@
+use chrono::{DateTime, Utc};
 use color_eyre::owo_colors::OwoColorize;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph, Tabs},
+    widgets::{Block, Borders, Gauge, Paragraph, Row, Table, Tabs},
     Frame,
 };
 use soundcloud::sobjects::CloudPlaylists;
 use strum::IntoEnumIterator;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{playlist_icon::PlaylistIcon, screen::AppScreen, sync::AppEvent};
+use crate::{screen::AppScreen, sync::AppEvent};
 
 struct Playlist {
-    name: String,
-    thumbnail: PlaylistIcon,
+    id: u64,
+    title: String,
     link: String,
+    created_at: String,
+    track_count: u32,
 }
 
 pub struct MainScreen {
@@ -168,28 +171,14 @@ impl MainScreen {
             pl.collection
                 .iter()
                 .map(|p| Playlist {
-                    name: p.title.clone(),
-                    thumbnail: p
-                        .artwork_url
-                        .as_deref()
-                        .map_or(PlaylistIcon::default(), |u| self.ascii_art_from_url(u)),
+                    id: p.id,
+                    created_at: p.created_at.clone(),
+                    title: p.title.clone(),
                     link: p.permalink_url.clone(),
+                    track_count: p.track_count,
                 })
                 .collect(),
         );
-    }
-
-    fn ascii_art_from_url(&self, url: &str) -> PlaylistIcon {
-        let img = image::load_from_memory(
-            &ureq::get(url)
-                .call()
-                .unwrap()
-                .body_mut()
-                .read_to_vec()
-                .unwrap(),
-        )
-        .unwrap();
-        PlaylistIcon::new(img.clone())
     }
 
     fn render_progress(&self, frame: &mut Frame, area: Rect) {
@@ -225,78 +214,49 @@ impl MainScreen {
 
     fn render_tab(&self, frame: &mut Frame, area: Rect) /*-> Table<'_>*/
     {
-        if self.selected_tab == 1 {
-            // SC
-            /*let mut v = Vec::new();
-            v.push(Row::new(vec!["Id", "Title", "Songs Count", "Date", "IS"]).style(Style::default().fg(Color::Gray)));
-            if let Some(s) = &self.soundcloud {
-                for (i, playlist) in (&s.collection).iter().enumerate() {
-                    let date: DateTime<Utc> = playlist.created_at.parse().unwrap();
-                    let mut row = Row::new(
-                        vec![
-                                    playlist.id.to_string(),
-                                    playlist.title.clone(),
-                                    [playlist.track_count.to_string(), " songs".to_string()].concat(),
-                                    format!("{}", date.format("%Y-%m-%d %H:%M")),
-                                    "NO".to_string()
-                                ]
-                    );
-                    if self.selected_row == i as i32 {
-                        row = row.style(Style::default().bg(Color::Yellow));
-                    }
-                    v.push(row);
-                }
-            }
-            v*/
-            let v = self.soundcloud.as_deref().unwrap_or(&[]);
-
-            let rows = Layout::default()
-                .direction(Direction::Vertical)
-                .constraints(vec![
-                    Constraint::Percentage(100);
-                    math::round::ceil(v.len() as f64 / 3_f64, 0) as usize
-                ]) // Two rows
-                .split(area);
-
-            for (i, row) in rows.iter().enumerate() {
-                let cols = Layout::default()
-                    .direction(Direction::Horizontal)
-                    .constraints(vec![Constraint::Percentage(33); 3]) // Three columns
-                    .split(*row);
-
-                for (j, col) in cols.iter().enumerate() {
-                    let index = i * 3 + j;
-                    if index < v.len() {
-                        let p = &v[index];
-
-                        /*let url_cl = p.thumbnail_url.clone();
-                        let s = url_cl.lines().map(Line::from).collect::<Vec<Line>>();*/
-
-                        let paragraph = Paragraph::new(Line::from(p.name.clone()))
-                            .block(Block::default().borders(Borders::ALL))
-                            .style(Style::default());
-
-                        let pl = Layout::default()
-                            .direction(Direction::Vertical)
-                            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
-                            .split(*col);
-
-                        frame.render_widget(p.thumbnail.clone(), pl[0]);
-                        frame.render_widget(paragraph, pl[1]);
+        let rows = match self.selected_tab {
+            1 => {
+                // SC
+                let mut v = Vec::new();
+                v.push(
+                    Row::new(vec!["Id", "Title", "Songs Count", "Date", "IS"])
+                        .style(Style::default().fg(Color::Gray)),
+                );
+                if let Some(s) = &self.soundcloud {
+                    for (i, playlist) in s.iter().enumerate() {
+                        let date: DateTime<Utc> = playlist.created_at.parse().unwrap();
+                        let mut row = Row::new(vec![
+                            playlist.id.to_string(),
+                            playlist.title.clone(),
+                            [playlist.track_count.to_string(), " songs".to_string()].concat(),
+                            format!("{}", date.format("%Y-%m-%d %H:%M")),
+                            "NO".to_string(),
+                        ]);
+                        if self.selected_row == i as i32 {
+                            row = row.style(Style::default().bg(Color::Yellow));
+                        }
+                        v.push(row);
                     }
                 }
+                v
             }
+            _ => Vec::new(),
         };
 
         // Create the table
-        /* Table::new(rows, &[
-            Constraint::Length(3),   // ID column
-            Constraint::Percentage(50), // Playlist name column
-            Constraint::Percentage(20), // Song count column
-            Constraint::Percentage(30),
-            Constraint::Length(2)
-        ])
+        let table = Table::new(
+            rows,
+            &[
+                Constraint::Length(3),      // ID column
+                Constraint::Percentage(50), // Playlist name column
+                Constraint::Percentage(20), // Song count column
+                Constraint::Percentage(30),
+                Constraint::Length(2),
+            ],
+        )
         .block(Block::default().borders(Borders::ALL).title(" Playlists "))
-        .style(Style::default().fg(Color::White))  */
+        .style(Style::default().fg(Color::White));
+
+        frame.render_widget(table, area);
     }
 }
