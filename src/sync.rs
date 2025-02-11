@@ -34,7 +34,7 @@ pub fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedRec
                                 } else {
                                     let _ = sender.send(AppEvent::IPodNotFound).await;
                                 }*/
-                                let _ = sender.send(AppEvent::IPodFound("D:\\Documents\\RustroverProjects\\itunesdb\\ITunesDB\\two_tracks".to_string())).await;
+                                let _ = sender.send(AppEvent::IPodFound("/Users/michael/Documents/ipod/iTunes/iTunesDB".to_string())).await;
                             },
                             AppEvent::ParseItunes(path) => {
                                 // todo: parse itunes
