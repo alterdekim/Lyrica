@@ -261,7 +261,7 @@ impl MainScreen {
             for (i, row) in rows.iter().enumerate() {
                 let cols = Layout::default()
                     .direction(Direction::Horizontal)
-                    .constraints(vec![Constraint::Length(16); 2]) // Three columns
+                    .constraints(vec![Constraint::Percentage(33); 3]) // Three columns
                     .split(*row);
 
                 for (j, col) in cols.iter().enumerate() {
@@ -270,13 +270,19 @@ impl MainScreen {
                         let p = &v[index];
 
                         /*let url_cl = p.thumbnail_url.clone();
-                        let s = url_cl.lines().map(Line::from).collect::<Vec<Line>>();
+                        let s = url_cl.lines().map(Line::from).collect::<Vec<Line>>();*/
 
-                        let paragraph = Paragraph::new(s)
+                        let paragraph = Paragraph::new(Line::from(p.name.clone()))
                             .block(Block::default().borders(Borders::ALL))
-                            .style(Style::default());*/
+                            .style(Style::default());
 
-                        frame.render_widget(p.thumbnail.clone(), *col);
+                        let pl = Layout::default()
+                            .direction(Direction::Vertical)
+                            .constraints([Constraint::Percentage(70), Constraint::Percentage(30)])
+                            .split(*col);
+
+                        frame.render_widget(p.thumbnail.clone(), pl[0]);
+                        frame.render_widget(paragraph, pl[1]);
                     }
                 }
             }
