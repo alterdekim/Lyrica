@@ -27,3 +27,4 @@ throbber-widgets-tui = "0.8.0"
 image = { version = "0.24.9", default-features = false, features = ["jpeg", "png"] }
 ureq = "3.0.5"
 rascii_art = "0.4.5"
+color-thief = "0.2"

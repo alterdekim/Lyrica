@@ -1,28 +1,40 @@
 use std::{collections::HashMap, error::Error, io};
 
 use color_eyre::Result;
-use crossterm::{event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent, KeyEventKind}, execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
+use crossterm::{
+    event::{
+        DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent,
+        KeyEventKind,
+    },
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
 use futures::StreamExt;
-use ratatui::{prelude::{Backend, CrosstermBackend}, widgets::Widget, Frame, Terminal};
 use main_screen::MainScreen;
+use ratatui::{
+    prelude::{Backend, CrosstermBackend},
+    widgets::Widget,
+    Frame, Terminal,
+};
 use screen::AppScreen;
 use sync::AppEvent;
 use tokio::sync::mpsc::{self, Receiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
 use wait_screen::WaitScreen;
 
-mod dlp;
-mod util;
 mod config;
-mod screen;
+mod dlp;
 mod main_screen;
-mod wait_screen;
+mod playlist_icon;
+mod screen;
 mod sync;
+mod util;
+mod wait_screen;
 
 #[derive(Eq, Hash, PartialEq)]
 enum AppState {
     IPodWait,
-    MainScreen
+    MainScreen,
 }
 
 pub struct App {
@@ -40,14 +52,20 @@ impl Default for App {
         let token = CancellationToken::new();
 
         sync::initialize_async_service(tx, jr, token.clone());
-        
+
         let _ = jx.send(AppEvent::SearchIPod);
-        
+
         let mut screens: HashMap<AppState, Box<dyn AppScreen>> = HashMap::new();
         screens.insert(AppState::IPodWait, Box::new(WaitScreen::default()));
         screens.insert(AppState::MainScreen, Box::new(MainScreen::new(jx.clone())));
 
-        Self { receiver: rx, sender: jx, token, state: AppState::IPodWait, screens }
+        Self {
+            receiver: rx,
+            sender: jx,
+            token,
+            state: AppState::IPodWait,
+            screens,
+        }
     }
 }
 
@@ -85,7 +103,7 @@ impl App {
                         let _ = self.sender.send(AppEvent::SearchIPod);
                     },
                     AppEvent::ITunesParsed(xdb) => {
-    
+
                     },
                     AppEvent::SoundcloudGot(playlists) => {
                         let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
@@ -105,8 +123,13 @@ impl App {
     }
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
-        self.screens.get_mut(&self.state).unwrap().handle_key_event(key_event);
-        if let KeyCode::Char('q') = key_event.code { self.exit() }
+        self.screens
+            .get_mut(&self.state)
+            .unwrap()
+            .handle_key_event(key_event);
+        if let KeyCode::Char('q') = key_event.code {
+            self.exit()
+        }
     }
 
     fn exit(&mut self) {
