@@ -1,4 +1,4 @@
-<img align="left" width="100" height="100" src="">
+<img align="left" width="100" height="100" src="https://w0n.zip/file/dRDDwa">
 
 **Lyrica**
 
