@@ -91,9 +91,7 @@ fn get_ipod_path() -> Option<String> {
     match list() {
         Ok(l) => l.iter()
             .filter(|d| is_ipod(d))
-            .map(|d| get_mount_point(d))
-            .filter(|d| d.is_some())
-            .map(|d| d.unwrap())
+            .filter_map(|d| get_mount_point(d))
             .last(),
         Err(_e) => None
     }

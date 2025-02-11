@@ -1,4 +1,4 @@
-use ratatui::{style::Stylize, symbols::border, text::{Line, Text}, widgets::{Block, Paragraph, Widget}, Frame};
+use ratatui::{style::Stylize, symbols::border, text::{Line, Text}, widgets::{Block, Paragraph}, Frame};
 
 use crate::screen::AppScreen;
 

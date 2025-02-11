@@ -40,7 +40,7 @@ pub fn initialize_async_service(sender: Sender<AppEvent>, receiver: UnboundedRec
                                 // todo: parse itunes
                                 let _ = std::fs::create_dir_all(get_configs_dir());
                                 let cd = get_temp_itunesdb();
-                                let mut p: PathBuf = Path::new(&path).into();
+                                let p: PathBuf = Path::new(&path).into();
                                // p.push("iPod_Control");
                              //   p.push("iTunes");
                               //  p.set_file_name("iTunesDB");

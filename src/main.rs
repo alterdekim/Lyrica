@@ -1,15 +1,14 @@
-use std::{any::Any, cell::RefCell, collections::HashMap, error::Error, io, ops::Deref, path::{Path, PathBuf}};
+use std::{collections::HashMap, error::Error, io};
 
 use color_eyre::Result;
-use crossterm::{event::{self, DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent, KeyEventKind}, execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
+use crossterm::{event::{DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent, KeyEventKind}, execute, terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen}};
 use futures::StreamExt;
-use ratatui::{buffer::Buffer, layout::{Layout, Rect}, prelude::{Backend, CrosstermBackend}, style::{Color, Stylize}, symbols::border, text::{Line, Text}, widgets::{Block, Paragraph, Tabs, Widget}, DefaultTerminal, Frame, Terminal};
+use ratatui::{prelude::{Backend, CrosstermBackend}, widgets::Widget, Frame, Terminal};
 use main_screen::MainScreen;
 use screen::AppScreen;
 use sync::AppEvent;
-use tokio::{fs::File, io::AsyncReadExt, sync::mpsc::{self, Receiver, Sender, UnboundedReceiver, UnboundedSender}};
+use tokio::sync::mpsc::{self, Receiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
-use ratatui::prelude::Constraint::{Length, Min};
 use wait_screen::WaitScreen;
 
 mod dlp;
@@ -36,8 +35,8 @@ pub struct App {
 
 impl Default for App {
     fn default() -> Self {
-        let (tx, mut rx) = mpsc::channel(10);
-        let (jx, mut jr) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::channel(10);
+        let (jx, jr) = mpsc::unbounded_channel();
         let token = CancellationToken::new();
 
         sync::initialize_async_service(tx, jr, token.clone());
@@ -107,10 +106,7 @@ impl App {
 
     fn handle_key_event(&mut self, key_event: KeyEvent) {
         self.screens.get_mut(&self.state).unwrap().handle_key_event(key_event);
-        match key_event.code {
-            KeyCode::Char('q') => self.exit(),
-            _ => {}
-        }
+        if let KeyCode::Char('q') = key_event.code { self.exit() }
     }
 
     fn exit(&mut self) {

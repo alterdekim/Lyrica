@@ -1,7 +1,7 @@
 use std::any::Any;
 
 use crossterm::event::KeyEvent;
-use ratatui::{buffer::Buffer, layout::Rect, Frame};
+use ratatui::Frame;
 
 pub trait AppScreen {
     fn handle_key_event(&mut self, key_event: KeyEvent);
