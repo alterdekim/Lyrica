@@ -17,7 +17,7 @@ pub fn get_temp_dl_dir() -> PathBuf {
 pub fn get_config_path() -> PathBuf {
     let mut p = get_configs_dir();
     p.push("config");
-    p.set_extension(".toml");
+    p.set_extension("toml");
     p
 }
 

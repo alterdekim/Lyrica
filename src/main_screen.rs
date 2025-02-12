@@ -8,26 +8,26 @@ use ratatui::{
     widgets::{Block, Borders, Gauge, Paragraph, Row, Table, Tabs},
     Frame,
 };
-use soundcloud::sobjects::CloudPlaylists;
+use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
 use strum::IntoEnumIterator;
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{dlp::DownloadProgress, screen::AppScreen, sync::AppEvent};
 
-struct Playlist {
+/*struct Playlist {
     id: u64,
     title: String,
     link: String,
     created_at: String,
     track_count: u32,
-}
+}*/
 
 pub struct MainScreen {
     selected_tab: i8,
     selected_row: i32,
     max_rows: i32,
     tab_titles: Vec<String>,
-    soundcloud: Option<Vec<Playlist>>,
+    soundcloud: Option<Vec<CloudPlaylist>>,
     pub progress: Option<(u32, u32)>,
     pub s_progress: Option<DownloadProgress>,
     sender: UnboundedSender<AppEvent>,
@@ -160,31 +160,19 @@ impl MainScreen {
     fn download_row(&mut self) {
         if self.selected_tab == 1 {
             // SC
-            let playlist_url = self
+            let playlist = self
                 .soundcloud
                 .as_ref()
                 .unwrap()
                 .get(self.selected_row as usize)
                 .unwrap()
-                .link
                 .clone();
-            let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist_url));
+            let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist));
         }
     }
 
     pub fn set_soundcloud_playlists(&mut self, pl: CloudPlaylists) {
-        self.soundcloud = Some(
-            pl.collection
-                .iter()
-                .map(|p| Playlist {
-                    id: p.id,
-                    created_at: p.created_at.clone(),
-                    title: p.title.clone(),
-                    link: p.permalink_url.clone(),
-                    track_count: p.track_count,
-                })
-                .collect(),
-        );
+        self.soundcloud = Some(pl.collection);
     }
 
     fn render_progress(&self, frame: &mut Frame, area: Rect) {

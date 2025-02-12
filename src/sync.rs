@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use itunesdb::xobjects::XDatabase;
-use soundcloud::sobjects::CloudPlaylists;
+use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
 use tokio::{
     fs::File,
     io::{AsyncReadExt, AsyncWriteExt},
@@ -11,9 +11,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     config::{
-        get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb,
-        LyricaConfiguration,
+        get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration,
     },
+    db::{self, Track},
     dlp::{self, DownloadProgress},
 };
 
@@ -24,7 +24,7 @@ pub enum AppEvent {
     ParseItunes(String),
     ITunesParsed(XDatabase),
     SoundcloudGot(CloudPlaylists),
-    DownloadPlaylist(String),
+    DownloadPlaylist(CloudPlaylist),
     CurrentProgress(DownloadProgress),
     OverallProgress((u32, u32)),
 }
@@ -36,6 +36,8 @@ pub fn initialize_async_service(
 ) {
     tokio::spawn(async move {
         let _ = std::fs::create_dir_all(get_configs_dir());
+
+        let database = db::init_db();
 
         let mut receiver = receiver;
 
@@ -85,11 +87,17 @@ pub fn initialize_async_service(
 
                                 let _ = sender.send(AppEvent::SoundcloudGot(playlists)).await;
                             },
-                            AppEvent::DownloadPlaylist(playlist_url) => {
-                                if let Ok(()) = dlp::download_from_soundcloud(&playlist_url, &get_temp_dl_dir(), sender.clone()).await {
-                                    // TODO: sync with db
+                            AppEvent::DownloadPlaylist(playlist) => {
+                                if let Ok(()) = dlp::download_from_soundcloud(&playlist.permalink_url, &get_temp_dl_dir(), sender.clone()).await {
+                                    let tracks = playlist.tracks;
+                                    for track in tracks {
+                                        if track.title.is_none() { continue; }
+                                        let mut t: Track = track.into();
+                                        t.unique_id = db::get_last_track_id(&database).unwrap_or(80) + 1;
+                                        let _ = db::insert_track(&database, t);
+                                    }
                                 }
-                            }
+                            },
                             _ => {}
                         }
                     }
