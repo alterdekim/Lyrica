@@ -1,5 +1,6 @@
 use std::fs::File;
 
+use itunesdb::xobjects::{XArgument, XTrackItem};
 use md5::{Digest, Md5};
 use redb::{Database, Error, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
@@ -62,6 +63,37 @@ impl From<CloudTrack> for Track {
             album: String::new(),
             artist: "Soundcloud".to_string(),
             genre: value.genre.unwrap_or_default(),
+        }
+    }
+}
+
+fn find_str_arg(value: &XTrackItem, arg_type: u32) -> Option<&XArgument> {
+    value.args.iter().find(|arg| arg.arg_type == arg_type)
+}
+
+impl From<XTrackItem> for Track {
+    fn from(value: XTrackItem) -> Self {
+        Track {
+            unique_id: value.data.unique_id,
+            filetype: value.data.filetype,
+            stars: value.data.stars,
+            last_modified_time: value.data.last_modified_time,
+            size: value.data.size,
+            length: value.data.length,
+            year: value.data.year,
+            bitrate: value.data.bitrate,
+            sample_rate: value.data.sample_rate,
+            play_count: value.data.play_count,
+            dbid: value.data.dbid,
+            bpm: value.data.bpm,
+            skip_count: value.data.skip_count,
+            has_artwork: value.data.has_artwork,
+            media_type: value.data.media_type,
+            title: find_str_arg(&value, 1).map_or(String::new(), |a| a.val.clone()),
+            location: find_str_arg(&value, 2).map_or(String::new(), |a| a.val.clone()),
+            album: find_str_arg(&value, 3).map_or(String::new(), |a| a.val.clone()),
+            artist: find_str_arg(&value, 4).map_or(String::new(), |a| a.val.clone()),
+            genre: find_str_arg(&value, 5).map_or(String::new(), |a| a.val.clone()),
         }
     }
 }

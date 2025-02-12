@@ -263,6 +263,32 @@ impl MainScreen {
                 }
                 v
             }
+            2 => {
+                // local
+                /*   let mut v = Vec::new();
+                v.push(
+                    Row::new(vec!["Id", "Title", "Artist", "Bitrate", "Hash"])
+                        .style(Style::default().fg(Color::Gray)),
+                );
+                if let Some(s) = &self.soundcloud {
+                    for (i, playlist) in s.iter().enumerate() {
+                        let date: DateTime<Utc> = playlist.created_at.parse().unwrap();
+                        let mut row = Row::new(vec![
+                            playlist.id.to_string(),
+                            playlist.title.clone(),
+                            [playlist.track_count.to_string(), " songs".to_string()].concat(),
+                            format!("{}", date.format("%Y-%m-%d %H:%M")),
+                            "NO".to_string(),
+                        ]);
+                        if self.selected_row == i as i32 {
+                            row = row.style(Style::default().bg(Color::Yellow));
+                        }
+                        v.push(row);
+                    }
+                }
+                v*/
+                Vec::new()
+            }
             _ => Vec::new(),
         };
 

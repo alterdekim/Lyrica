@@ -1,6 +1,7 @@
 use std::path::{Path, PathBuf};
 
-use itunesdb::xobjects::XDatabase;
+use itunesdb::xobjects::{XDatabase, XSomeList};
+use redb::Database;
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
 use tokio::{
     fs::File,
@@ -55,49 +56,8 @@ pub fn initialize_async_service(
                                 }*/
                                 let _ = sender.send(AppEvent::IPodFound("/Users/michael/Documents/ipod/iTunes/iTunesDB".to_string())).await;
                             },
-                            AppEvent::ParseItunes(path) => {
-                                // todo: parse itunes
-                                let cd = get_temp_itunesdb();
-                                let p: PathBuf = Path::new(&path).into();
-                               // p.push("iPod_Control");
-                             //   p.push("iTunes");
-                              //  p.set_file_name("iTunesDB");
-                                let _ = std::fs::copy(p, &cd);
-                                let mut file = File::open(cd).await.unwrap();
-                                let mut contents = vec![];
-                                file.read_to_end(&mut contents).await.unwrap();
-                                let xdb = itunesdb::deserializer::parse_bytes(&contents);
-                                let _ = sender.send(AppEvent::ITunesParsed(xdb)).await;
-
-                                let p = get_config_path();
-                                if !p.exists() {
-                                    let config = LyricaConfiguration::default();
-                                    let cfg_str = toml::to_string_pretty(&config).unwrap();
-                                    let mut file = File::create(&p).await.unwrap();
-                                    file.write(cfg_str.as_bytes()).await;
-                                }
-                                let mut file = File::open(p).await.unwrap();
-                                let mut content = String::new();
-                                file.read_to_string(&mut content).await.unwrap();
-                                let config: LyricaConfiguration = toml::from_str(&content).unwrap();
-
-                                let app_version = soundcloud::get_app().await.unwrap().unwrap();
-                                let client_id = soundcloud::get_client_id().await.unwrap().unwrap();
-                                let playlists = soundcloud::get_playlists(config.get_soundcloud().user_id, client_id, app_version).await.unwrap();
-
-                                let _ = sender.send(AppEvent::SoundcloudGot(playlists)).await;
-                            },
-                            AppEvent::DownloadPlaylist(playlist) => {
-                                if let Ok(()) = dlp::download_from_soundcloud(&playlist.permalink_url, &get_temp_dl_dir(), sender.clone()).await {
-                                    let tracks = playlist.tracks;
-                                    for track in tracks {
-                                        if track.title.is_none() { continue; }
-                                        let mut t: Track = track.into();
-                                        t.unique_id = db::get_last_track_id(&database).unwrap_or(80) + 1;
-                                        let _ = db::insert_track(&database, t);
-                                    }
-                                }
-                            },
+                            AppEvent::ParseItunes(path) => parse_itunes(&database, &sender, path).await,
+                            AppEvent::DownloadPlaylist(playlist) => download_playlist(playlist, &database, &sender).await,
                             _ => {}
                         }
                     }
@@ -105,4 +65,69 @@ pub fn initialize_async_service(
             }
         }
     });
+}
+
+async fn download_playlist(
+    playlist: CloudPlaylist,
+    database: &Database,
+    sender: &Sender<AppEvent>,
+) {
+    if let Ok(()) =
+        dlp::download_from_soundcloud(&playlist.permalink_url, &get_temp_dl_dir(), sender.clone())
+            .await
+    {
+        let tracks = playlist.tracks;
+        for track in tracks {
+            if track.title.is_none() {
+                continue;
+            }
+            let mut t: Track = track.into();
+            t.unique_id = db::get_last_track_id(database).unwrap_or(80) + 1;
+            let _ = db::insert_track(database, t);
+        }
+    }
+}
+
+async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: String) {
+    // todo: parse itunes
+    let cd = get_temp_itunesdb();
+    let p: PathBuf = Path::new(&path).into();
+    // p.push("iPod_Control");
+    //   p.push("iTunes");
+    //  p.set_file_name("iTunesDB");
+    let _ = std::fs::copy(p, &cd);
+    let mut file = File::open(cd).await.unwrap();
+    let mut contents = vec![];
+    file.read_to_end(&mut contents).await.unwrap();
+    let mut xdb = itunesdb::deserializer::parse_bytes(&contents);
+
+    if let XSomeList::TrackList(tracks) = &xdb.find_dataset(1).child {
+        for track in tracks {
+            let t: Track = track.clone().into();
+            let _ = db::insert_track(database, t);
+        }
+    }
+
+    let _ = sender.send(AppEvent::ITunesParsed(xdb)).await;
+
+    let p = get_config_path();
+    if !p.exists() {
+        let config = LyricaConfiguration::default();
+        let cfg_str = toml::to_string_pretty(&config).unwrap();
+        let mut file = File::create(&p).await.unwrap();
+        file.write(cfg_str.as_bytes()).await;
+    }
+    let mut file = File::open(p).await.unwrap();
+    let mut content = String::new();
+    file.read_to_string(&mut content).await.unwrap();
+    let config: LyricaConfiguration = toml::from_str(&content).unwrap();
+
+    let app_version = soundcloud::get_app().await.unwrap().unwrap();
+    let client_id = soundcloud::get_client_id().await.unwrap().unwrap();
+    let playlists =
+        soundcloud::get_playlists(config.get_soundcloud().user_id, client_id, app_version)
+            .await
+            .unwrap();
+
+    let _ = sender.send(AppEvent::SoundcloudGot(playlists)).await;
 }
