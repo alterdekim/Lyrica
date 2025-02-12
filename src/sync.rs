@@ -16,18 +16,18 @@ use crate::{
     },
     db::{self, Track},
     dlp::{self, DownloadProgress},
+    AppState,
 };
 
 pub enum AppEvent {
     SearchIPod,
-    IPodFound(String),
     IPodNotFound,
-    ParseItunes(String),
     ITunesParsed(Vec<Track>),
     SoundcloudGot(CloudPlaylists),
     DownloadPlaylist(CloudPlaylist),
     CurrentProgress(DownloadProgress),
     OverallProgress((u32, u32)),
+    SwitchScreen(AppState),
 }
 
 pub fn initialize_async_service(
@@ -54,9 +54,9 @@ pub fn initialize_async_service(
                                 } else {
                                     let _ = sender.send(AppEvent::IPodNotFound).await;
                                 }*/
-                                let _ = sender.send(AppEvent::IPodFound("/Users/michael/Documents/ipod/iTunes/iTunesDB".to_string())).await;
+                                let _ = sender.send(AppEvent::SwitchScreen(AppState::MainScreen)).await;
+                                parse_itunes(&database, &sender, "/Users/michael/Documents/ipod/iTunes/iTunesDB".to_string()).await;
                             },
-                            AppEvent::ParseItunes(path) => parse_itunes(&database, &sender, path).await,
                             AppEvent::DownloadPlaylist(playlist) => download_playlist(playlist, &database, &sender).await,
                             _ => {}
                         }

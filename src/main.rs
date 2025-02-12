@@ -101,10 +101,6 @@ impl App {
             },
             Some(event) = self.receiver.recv() => {
                 match event {
-                    AppEvent::IPodFound(path) => {
-                        self.state = AppState::MainScreen;
-                        let _ = self.sender.send(AppEvent::ParseItunes(path));
-                    },
                     AppEvent::IPodNotFound => {
                         let _ = self.sender.send(AppEvent::SearchIPod);
                     },
@@ -117,15 +113,16 @@ impl App {
                         screen.set_soundcloud_playlists(playlists);
                     },
                     AppEvent::OverallProgress((c, max)) => {
-                        self.state = AppState::LoadingScreen;
                         let screen: &mut LoadingScreen = self.get_screen(&AppState::LoadingScreen);
                         screen.progress = Some((c, max));
                     },
                     AppEvent::CurrentProgress(progress) => {
-                        self.state = AppState::LoadingScreen;
                         let screen: &mut LoadingScreen = self.get_screen(&AppState::LoadingScreen);
                         screen.s_progress = Some(progress);
                     },
+                    AppEvent::SwitchScreen(screen) => {
+                        self.state = screen;
+                    }
                     _ => {}
                 }
             }

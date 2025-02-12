@@ -19,7 +19,7 @@ pub struct Track {
     size: u32,
     length: u32,
     year: u32,
-    bitrate: u32,
+    pub bitrate: u32,
     sample_rate: u32,
     play_count: u32,
     pub dbid: u64,
@@ -30,7 +30,7 @@ pub struct Track {
     pub title: String,
     location: String,
     album: String,
-    artist: String,
+    pub artist: String,
     genre: String,
 }
 

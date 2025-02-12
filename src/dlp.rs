@@ -23,6 +23,9 @@ pub async fn download_from_soundcloud(
     download_dir: &PathBuf,
     sender: Sender<AppEvent>,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    let _ = sender
+        .send(AppEvent::SwitchScreen(crate::AppState::LoadingScreen))
+        .await;
     let dl_rx: Regex = Regex::new(r"\[download\] Downloading item \d+ of \d+").unwrap();
 
     if download_dir.exists() {
