@@ -10,6 +10,7 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
+use loading_screen::LoadingScreen;
 use main_screen::MainScreen;
 use ratatui::{
     prelude::{Backend, CrosstermBackend},
@@ -25,6 +26,8 @@ use wait_screen::WaitScreen;
 mod config;
 mod db;
 mod dlp;
+mod file_system;
+mod loading_screen;
 mod main_screen;
 mod screen;
 mod sync;
@@ -35,6 +38,8 @@ mod wait_screen;
 enum AppState {
     IPodWait,
     MainScreen,
+    LoadingScreen,
+    FileSystem,
 }
 
 pub struct App {
@@ -58,6 +63,7 @@ impl Default for App {
         let mut screens: HashMap<AppState, Box<dyn AppScreen>> = HashMap::new();
         screens.insert(AppState::IPodWait, Box::new(WaitScreen::default()));
         screens.insert(AppState::MainScreen, Box::new(MainScreen::new(jx.clone())));
+        screens.insert(AppState::LoadingScreen, Box::new(LoadingScreen::default()));
 
         Self {
             receiver: rx,
@@ -102,25 +108,23 @@ impl App {
                     AppEvent::IPodNotFound => {
                         let _ = self.sender.send(AppEvent::SearchIPod);
                     },
-                    AppEvent::ITunesParsed(xdb) => {
-
+                    AppEvent::ITunesParsed(tracks) => {
+                        let screen: &mut MainScreen = self.get_screen(&AppState::MainScreen);
+                        screen.tracks = Some(tracks);
                     },
                     AppEvent::SoundcloudGot(playlists) => {
-                        let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
-                        let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
+                        let screen: &mut MainScreen = self.get_screen(&AppState::MainScreen);
                         screen.set_soundcloud_playlists(playlists);
                     },
                     AppEvent::OverallProgress((c, max)) => {
-                        let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
-                        let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
+                        self.state = AppState::LoadingScreen;
+                        let screen: &mut LoadingScreen = self.get_screen(&AppState::LoadingScreen);
                         screen.progress = Some((c, max));
-                        screen.download_screen();
                     },
                     AppEvent::CurrentProgress(progress) => {
-                        let a = self.screens.get_mut(&AppState::MainScreen).unwrap();
-                        let screen: &mut MainScreen = a.as_any().downcast_mut::<MainScreen>().unwrap();
+                        self.state = AppState::LoadingScreen;
+                        let screen: &mut LoadingScreen = self.get_screen(&AppState::LoadingScreen);
                         screen.s_progress = Some(progress);
-                        screen.download_screen();
                     },
                     _ => {}
                 }
@@ -140,6 +144,14 @@ impl App {
 
     fn exit(&mut self) {
         self.token.cancel();
+    }
+
+    fn get_screen<T>(&mut self, state: &AppState) -> &mut T
+    where
+        T: 'static + AppScreen,
+    {
+        let a = self.screens.get_mut(state).unwrap();
+        a.as_any().downcast_mut::<T>().unwrap()
     }
 }
 

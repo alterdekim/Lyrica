@@ -124,6 +124,17 @@ pub fn get_track(db: &Database, id: u32) -> Result<Track, Error> {
     Ok(track)
 }
 
+pub fn get_all_tracks(db: &Database) -> Result<Vec<Track>, Error> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(TRACKS)?;
+    Ok(table
+        .iter()
+        .unwrap()
+        .flatten()
+        .map(|d| bincode::deserialize(&d.1.value()).unwrap())
+        .collect::<Vec<Track>>())
+}
+
 pub fn get_last_track_id(db: &Database) -> Result<u32, Error> {
     let read_txn = db.begin_read()?;
     let table = read_txn.open_table(TRACKS)?;

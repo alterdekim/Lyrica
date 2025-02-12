@@ -5,22 +5,14 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Gauge, Paragraph, Row, Table, Tabs},
+    widgets::{Block, Borders, Paragraph, Row, Table, Tabs},
     Frame,
 };
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
 use strum::IntoEnumIterator;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{dlp::DownloadProgress, screen::AppScreen, sync::AppEvent};
-
-/*struct Playlist {
-    id: u64,
-    title: String,
-    link: String,
-    created_at: String,
-    track_count: u32,
-}*/
+use crate::{db::Track, screen::AppScreen, sync::AppEvent};
 
 pub struct MainScreen {
     selected_tab: i8,
@@ -28,8 +20,7 @@ pub struct MainScreen {
     max_rows: i32,
     tab_titles: Vec<String>,
     soundcloud: Option<Vec<CloudPlaylist>>,
-    pub progress: Option<(u32, u32)>,
-    pub s_progress: Option<DownloadProgress>,
+    pub tracks: Option<Vec<Track>>,
     sender: UnboundedSender<AppEvent>,
 }
 
@@ -72,10 +63,7 @@ impl AppScreen for MainScreen {
 
         frame.render_widget(tabs, chunks[0]);
 
-        match self.selected_tab {
-            -1 => self.render_progress(frame, chunks[1]),
-            _ => self.render_tab(frame, chunks[1]),
-        }
+        self.render_tab(frame, chunks[1]);
 
         // Render Status Bar
         let status_bar = Paragraph::new(Line::from(vec![
@@ -101,11 +89,10 @@ impl AppScreen for MainScreen {
 impl MainScreen {
     pub fn new(sender: UnboundedSender<AppEvent>) -> Self {
         MainScreen {
-            selected_row: -1,
+            selected_row: 0,
             max_rows: 0,
             soundcloud: None,
-            progress: None,
-            s_progress: None,
+            tracks: None,
             selected_tab: 0,
             tab_titles: vec![
                 "YouTube".to_string(),
@@ -115,10 +102,6 @@ impl MainScreen {
             ],
             sender,
         }
-    }
-
-    pub fn download_screen(&mut self) {
-        self.selected_tab = -1;
     }
 
     fn update_max_rows(&mut self) {
@@ -175,66 +158,6 @@ impl MainScreen {
         self.soundcloud = Some(pl.collection);
     }
 
-    fn render_progress(&self, frame: &mut Frame, area: Rect) {
-        let chunks = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(0),    // Main content
-                Constraint::Length(6), // Progress bar
-                Constraint::Length(6), // Progress bar
-            ])
-            .split(area);
-
-        let main_content = Paragraph::new("Please wait").block(
-            Block::default()
-                .borders(Borders::ALL)
-                .title("Downloading has started!"),
-        );
-
-        frame.render_widget(main_content, chunks[0]);
-
-        let gauge = Gauge::default()
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Downloading Playlist "),
-            )
-            .gauge_style(Style::default().fg(Color::Green))
-            .ratio(self.progress.unwrap().0 as f64 / self.progress.unwrap().1 as f64)
-            .label(format!(
-                "{:}/{:}",
-                self.progress.unwrap().0,
-                self.progress.unwrap().1
-            ));
-
-        frame.render_widget(gauge, chunks[1]);
-
-        if self.s_progress.is_none() {
-            return;
-        }
-
-        let s: String = self
-            .s_progress
-            .as_ref()
-            .unwrap()
-            .progress_percentage
-            .chars()
-            .filter(|c| c.is_ascii_digit() || *c == '.')
-            .collect();
-        let ratio: f64 = s.parse::<f64>().unwrap_or(0.0);
-
-        let gauge = Gauge::default()
-            .block(Block::default().borders(Borders::ALL).title(format!(
-                " Downloading Item (ETA: {}) ",
-                self.s_progress.as_ref().unwrap().eta
-            )))
-            .gauge_style(Style::default().fg(Color::Green))
-            .ratio(ratio / 100.0)
-            .label(self.s_progress.as_ref().unwrap().progress_total.to_string());
-
-        frame.render_widget(gauge, chunks[2]);
-    }
-
     fn render_tab(&self, frame: &mut Frame, area: Rect) /*-> Table<'_>*/
     {
         let rows = match self.selected_tab {
@@ -265,7 +188,7 @@ impl MainScreen {
             }
             2 => {
                 // local
-                /*   let mut v = Vec::new();
+                let mut v = Vec::new();
                 v.push(
                     Row::new(vec!["Id", "Title", "Artist", "Bitrate", "Hash"])
                         .style(Style::default().fg(Color::Gray)),
@@ -286,8 +209,7 @@ impl MainScreen {
                         v.push(row);
                     }
                 }
-                v*/
-                Vec::new()
+                v
             }
             _ => Vec::new(),
         };

@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use itunesdb::xobjects::{XDatabase, XSomeList};
+use itunesdb::xobjects::XSomeList;
 use redb::Database;
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
 use tokio::{
@@ -23,7 +23,7 @@ pub enum AppEvent {
     IPodFound(String),
     IPodNotFound,
     ParseItunes(String),
-    ITunesParsed(XDatabase),
+    ITunesParsed(Vec<Track>),
     SoundcloudGot(CloudPlaylists),
     DownloadPlaylist(CloudPlaylist),
     CurrentProgress(DownloadProgress),
@@ -108,7 +108,11 @@ async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: Stri
         }
     }
 
-    let _ = sender.send(AppEvent::ITunesParsed(xdb)).await;
+    let _ = sender
+        .send(AppEvent::ITunesParsed(
+            db::get_all_tracks(database).unwrap(),
+        ))
+        .await;
 
     let p = get_config_path();
     if !p.exists() {
