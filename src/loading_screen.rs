@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{dlp::DownloadProgress, screen::AppScreen};
+use crate::{dlp::DownloadProgress, screen::AppScreen, theme::Theme};
 
 #[derive(Default)]
 pub struct LoadingScreen {
@@ -17,7 +17,7 @@ pub struct LoadingScreen {
 impl AppScreen for LoadingScreen {
     fn handle_key_event(&mut self, key_event: crossterm::event::KeyEvent) {}
 
-    fn render(&self, frame: &mut ratatui::Frame) {
+    fn render(&self, frame: &mut ratatui::Frame, theme: &Theme) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([

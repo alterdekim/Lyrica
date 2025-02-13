@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use color_eyre::owo_colors::OwoColorize;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -9,10 +8,9 @@ use ratatui::{
     Frame,
 };
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
-use strum::IntoEnumIterator;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{db::Track, screen::AppScreen, sync::AppEvent};
+use crate::{db::Track, screen::AppScreen, sync::AppEvent, theme::Theme};
 
 pub struct MainScreen {
     selected_tab: i8,
@@ -36,7 +34,7 @@ impl AppScreen for MainScreen {
         }
     }
 
-    fn render(&self, frame: &mut Frame) {
+    fn render(&self, frame: &mut Frame, theme: &Theme) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -55,11 +53,11 @@ impl AppScreen for MainScreen {
         .block(Block::default().borders(Borders::ALL))
         .highlight_style(
             Style::default()
-                .fg(Color::Cyan)
+                .fg(Color::LightBlue)
                 .add_modifier(Modifier::BOLD),
         )
         .select(self.selected_tab as usize)
-        .style(Style::default().fg(Color::White));
+        .style(Style::default().fg(Color::Black));
 
         frame.render_widget(tabs, chunks[0]);
 
@@ -179,7 +177,7 @@ impl MainScreen {
                             "NO".to_string(),
                         ]);
                         if self.selected_row == i as i32 {
-                            row = row.style(Style::default().bg(Color::Yellow));
+                            row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
                         }
                         v.push(row);
                     }
@@ -203,7 +201,7 @@ impl MainScreen {
                             format!("{:X}", track.dbid),
                         ]);
                         if self.selected_row == i as i32 {
-                            row = row.style(Style::default().bg(Color::Yellow));
+                            row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
                         }
                         v.push(row);
                     }
@@ -225,7 +223,7 @@ impl MainScreen {
             ],
         )
         .block(Block::default().borders(Borders::ALL).title(" Playlists "))
-        .style(Style::default().fg(Color::White));
+        .style(Style::default().fg(Color::Black));
 
         frame.render_widget(table, area);
     }

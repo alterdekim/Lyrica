@@ -1,5 +1,6 @@
 use std::{collections::HashMap, error::Error, io};
 
+use crate::theme::Theme;
 use color_eyre::Result;
 use crossterm::{
     event::{
@@ -31,6 +32,7 @@ mod loading_screen;
 mod main_screen;
 mod screen;
 mod sync;
+mod theme;
 mod util;
 mod wait_screen;
 
@@ -48,6 +50,7 @@ pub struct App {
     receiver: Receiver<AppEvent>,
     sender: UnboundedSender<AppEvent>,
     token: CancellationToken,
+    theme: Theme,
 }
 
 impl Default for App {
@@ -71,6 +74,7 @@ impl Default for App {
             token,
             state: AppState::IPodWait,
             screens,
+            theme: Theme::default(),
         }
     }
 }
@@ -86,7 +90,10 @@ impl App {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        self.screens.get(&self.state).unwrap().render(frame);
+        self.screens
+            .get(&self.state)
+            .unwrap()
+            .render(frame, &self.theme);
     }
 
     async fn handle_events(&mut self, reader: &mut EventStream) {

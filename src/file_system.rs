@@ -1,11 +1,11 @@
-use crate::screen::AppScreen;
+use crate::{screen::AppScreen, theme::Theme};
 
 pub struct FileSystem {}
 
 impl AppScreen for FileSystem {
     fn handle_key_event(&mut self, key_event: crossterm::event::KeyEvent) {}
 
-    fn render(&self, frame: &mut ratatui::Frame) {
+    fn render(&self, frame: &mut ratatui::Frame, theme: &Theme) {
         todo!()
     }
 
