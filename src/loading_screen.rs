@@ -57,26 +57,16 @@ impl LoadingScreen {
 
         frame.render_widget(main_content, chunks[0]);
 
-        let gauge = Gauge::default()
-            .block(
-                Block::default()
-                    .borders(Borders::ALL)
-                    .title(" Downloading Playlist "),
-            )
-            .gauge_style(Style::default().fg(Color::Green))
-            .ratio(self.progress.unwrap().0 as f64 / self.progress.unwrap().1 as f64)
-            .label(format!(
-                "{:}/{:}",
-                self.progress.unwrap().0,
-                self.progress.unwrap().1
-            ));
-
-        frame.render_widget(gauge, chunks[1]);
-
-        if self.s_progress.is_none() {
-            return;
+        if self.progress.is_some() {
+            self.render_overall(frame, chunks[1]);
         }
 
+        if self.s_progress.is_some() {
+            self.render_current(frame, chunks[2]);
+        }
+    }
+
+    fn render_current(&self, frame: &mut Frame, area: Rect) {
         let s: String = self
             .s_progress
             .as_ref()
@@ -96,6 +86,24 @@ impl LoadingScreen {
             .ratio(ratio / 100.0)
             .label(self.s_progress.as_ref().unwrap().progress_total.to_string());
 
-        frame.render_widget(gauge, chunks[2]);
+        frame.render_widget(gauge, area);
+    }
+
+    fn render_overall(&self, frame: &mut Frame, area: Rect) {
+        let gauge = Gauge::default()
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Downloading Playlist "),
+            )
+            .gauge_style(Style::default().fg(Color::Green))
+            .ratio(self.progress.unwrap().0 as f64 / self.progress.unwrap().1 as f64)
+            .label(format!(
+                "{:}/{:}",
+                self.progress.unwrap().0,
+                self.progress.unwrap().1
+            ));
+
+        frame.render_widget(gauge, area);
     }
 }

@@ -50,7 +50,7 @@ impl From<CloudTrack> for Track {
             size: f.metadata().unwrap().len() as u32,
             length: 0,
             year: 0,
-            bitrate: header.bitrate.bps(),
+            bitrate: header.bitrate.bps() / 1000,
             sample_rate: header.sample_rate.hz(),
             play_count: 0,
             dbid: hash(data),
@@ -61,7 +61,9 @@ impl From<CloudTrack> for Track {
             title: value.title.unwrap(),
             location: String::new(),
             album: String::new(),
-            artist: "Soundcloud".to_string(),
+            artist: value
+                .user
+                .map_or(String::new(), |a| a.username.unwrap_or(a.permalink)),
             genre: value.genre.unwrap_or_default(),
         }
     }

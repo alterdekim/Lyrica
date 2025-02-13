@@ -86,6 +86,9 @@ async fn download_playlist(
             let _ = db::insert_track(database, t);
         }
     }
+    let _ = sender
+        .send(AppEvent::SwitchScreen(AppState::MainScreen))
+        .await;
 }
 
 async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: String) {
@@ -119,7 +122,7 @@ async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: Stri
         let config = LyricaConfiguration::default();
         let cfg_str = toml::to_string_pretty(&config).unwrap();
         let mut file = File::create(&p).await.unwrap();
-        file.write(cfg_str.as_bytes()).await;
+        let _ = file.write(cfg_str.as_bytes()).await;
     }
     let mut file = File::open(p).await.unwrap();
     let mut content = String::new();
@@ -128,10 +131,31 @@ async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: Stri
 
     let app_version = soundcloud::get_app().await.unwrap().unwrap();
     let client_id = soundcloud::get_client_id().await.unwrap().unwrap();
-    let playlists =
-        soundcloud::get_playlists(config.get_soundcloud().user_id, client_id, app_version)
-            .await
-            .unwrap();
+    let playlists = soundcloud::get_playlists(
+        config.get_soundcloud().user_id,
+        client_id.clone(),
+        app_version.clone(),
+    )
+    .await
+    .unwrap();
 
-    let _ = sender.send(AppEvent::SoundcloudGot(playlists)).await;
+    let mut playlists = playlists.collection;
+
+    for playlist in playlists.iter_mut() {
+        if let Ok(tracks) = soundcloud::get_tracks(
+            playlist.tracks.clone(),
+            client_id.clone(),
+            app_version.clone(),
+        )
+        .await
+        {
+            playlist.tracks = tracks;
+        }
+    }
+
+    let _ = sender
+        .send(AppEvent::SoundcloudGot(CloudPlaylists {
+            collection: playlists,
+        }))
+        .await;
 }
