@@ -111,9 +111,9 @@ impl App {
                     AppEvent::IPodNotFound => {
                         let _ = self.sender.send(AppEvent::SearchIPod);
                     },
-                    AppEvent::ITunesParsed(tracks) => {
+                    AppEvent::ITunesParsed(playlists) => {
                         let screen: &mut MainScreen = self.get_screen(&AppState::MainScreen);
-                        screen.tracks = Some(tracks);
+                        screen.set_itunes(playlists);
                     },
                     AppEvent::SoundcloudGot(playlists) => {
                         let screen: &mut MainScreen = self.get_screen(&AppState::MainScreen);

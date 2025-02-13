@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
@@ -11,6 +11,7 @@ use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::{db::Track, screen::AppScreen, sync::AppEvent, theme::Theme};
+use crate::db::DBPlaylist;
 
 pub struct MainScreen {
     mode: bool,
@@ -21,7 +22,7 @@ pub struct MainScreen {
     max_songs: i32,
     tab_titles: Vec<String>,
     soundcloud: Option<Vec<CloudPlaylist>>,
-    pub tracks: Option<Vec<Track>>,
+    playlists: Option<Vec<DBPlaylist>>,
     sender: UnboundedSender<AppEvent>,
 }
 
@@ -97,12 +98,12 @@ impl MainScreen {
             max_pls: 0,
             max_songs: 0,
             soundcloud: None,
-            tracks: None,
+            playlists: None,
             selected_tab: 0,
             tab_titles: vec![
                 "YouTube".to_string(),
                 "SoundCloud".to_string(),
-                "Local Playlists".to_string(),
+                "iPod".to_string(),
                 "Settings".to_string(),
             ],
             sender,
@@ -115,7 +116,7 @@ impl MainScreen {
         self.max_songs = 0;
         self.max_pls = match self.selected_tab {
             1 => self.soundcloud.as_deref().unwrap_or(&[]).len(),
-            2 => self.tracks.as_deref().unwrap_or(&[]).len(),
+            2 => self.playlists.as_deref().unwrap_or(&[]).len(),
             _ => 0,
         }
         .try_into()
@@ -201,6 +202,13 @@ impl MainScreen {
             self.update_max_rows();
         }
     }
+    
+    pub fn set_itunes(&mut self, pl: Vec<DBPlaylist>) {
+        self.playlists = Some(pl);
+        if self.selected_tab == 2 {
+            self.update_max_rows();
+        }
+    }
 
     fn render_tab(&self, frame: &mut Frame, area: Rect) {
         let rows = match self.selected_tab {
@@ -233,17 +241,18 @@ impl MainScreen {
                 // local
                 let mut v = Vec::new();
                 v.push(
-                    Row::new(vec!["Id", "Title", "Artist", "Bitrate", "Hash"])
+                    Row::new(vec!["Id", "Title", "Songs Count", "Date", "IS"])
                         .style(Style::default().fg(Color::Gray)),
                 );
-                if let Some(s) = &self.tracks {
-                    for (i, track) in s.iter().enumerate() {
+                if let Some(s) = &self.playlists {
+                    for (i, playlist) in s.iter().enumerate() {
+                        let date = Utc.timestamp_millis_opt(playlist.timestamp as i64).unwrap();
                         let mut row = Row::new(vec![
-                            track.unique_id.to_string(),
-                            track.title.clone(),
-                            track.artist.clone(),
-                            track.bitrate.to_string(),
-                            format!("{:X}", track.dbid),
+                            playlist.persistent_playlist_id.to_string(),
+                            "".to_string(),
+                            playlist.tracks.len().to_string(),
+                            format!("{}", date.format("%Y-%m-%d %H:%M")),
+                            "YES".to_string(),
                         ]);
                         if self.selected_playlist == i as i32 {
                             row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
@@ -282,7 +291,7 @@ impl MainScreen {
 
         let rows = match self.selected_tab {
             1 => {
-                // local
+                // sc
                 let mut v = Vec::new();
                 v.push(
                     Row::new(vec!["Id", "Title", "Artist", "Duration", "Genre"])
@@ -302,6 +311,31 @@ impl MainScreen {
                                 .unwrap_or(track.user.as_ref().unwrap().permalink.clone()),
                             track.duration.unwrap_or(0).to_string(),
                             track.genre.as_ref().unwrap_or(&String::new()).to_string(),
+                        ]);
+                        if self.selected_song == i as i32 {
+                            row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
+                        }
+                        v.push(row);
+                    }
+                }
+                v
+            },
+            2 => {
+                // local
+                let mut v = Vec::new();
+                v.push(
+                    Row::new(vec!["Id", "Title", "Artist", "Bitrate", "Genre"])
+                        .style(Style::default().fg(Color::Gray)),
+                );
+                if let Some(pls) = &self.playlists {
+                    let s = &pls.get(self.selected_playlist as usize).unwrap().tracks;
+                    for (i, track) in s.iter().enumerate() {
+                        let mut row = Row::new(vec![
+                            track.unique_id.to_string(),
+                            track.title.clone(),
+                            track.artist.clone(),
+                            track.bitrate.to_string(),
+                            track.genre.clone(),
                         ]);
                         if self.selected_song == i as i32 {
                             row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));

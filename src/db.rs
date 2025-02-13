@@ -1,6 +1,6 @@
 use std::fs::File;
 
-use itunesdb::xobjects::{XArgument, XTrackItem};
+use itunesdb::xobjects::{XArgument, XPlaylist, XTrackItem};
 use md5::{Digest, Md5};
 use redb::{Database, Error, ReadableTable, TableDefinition};
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,7 @@ use soundcloud::sobjects::CloudTrack;
 use crate::config::{get_db, get_temp_dl_dir};
 
 const TRACKS: TableDefinition<u32, Vec<u8>> = TableDefinition::new("tracks");
+const PLAYLISTS: TableDefinition<u64, Vec<u8>> = TableDefinition::new("playlists");
 
 #[derive(Serialize, Deserialize)]
 pub struct Track {
@@ -17,7 +18,7 @@ pub struct Track {
     stars: u8,
     last_modified_time: u32,
     size: u32,
-    length: u32,
+    pub length: u32,
     year: u32,
     pub bitrate: u32,
     sample_rate: u32,
@@ -31,7 +32,25 @@ pub struct Track {
     location: String,
     album: String,
     pub artist: String,
-    genre: String,
+    pub genre: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct DBPlaylist {
+    pub persistent_playlist_id: u64,
+    pub title: String,
+    pub timestamp: u32,
+    pub is_master: bool,
+    pub tracks: Vec<Track>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Playlist {
+    pub persistent_playlist_id: u64,
+    pub title: String,
+    pub timestamp: u32,
+    pub is_master: bool,
+    pub tracks: Vec<u32>,
 }
 
 impl From<CloudTrack> for Track {
@@ -100,10 +119,55 @@ impl From<XTrackItem> for Track {
     }
 }
 
-// TODO: implement From (or Into) for Track, convert from Soundcloud Audio or iTunes
-
 pub fn init_db() -> Database {
     Database::create(get_db()).unwrap()
+}
+
+pub fn insert_playlist(db: &Database, playlist: Playlist) -> Result<(), Error> {
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(PLAYLISTS)?;
+        let uid = playlist.persistent_playlist_id;
+        let data = bincode::serialize(&playlist).unwrap();
+        table.insert(uid, data)?;
+    }
+    write_txn.commit()?;
+    Ok(())
+}
+
+pub fn get_playlist(db: &Database, id: u64) -> Result<DBPlaylist, Error> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(PLAYLISTS)?;
+    let b = table.get(id)?.unwrap().value();
+    let value: Playlist = bincode::deserialize(&b).unwrap();
+    let playlist = DBPlaylist {
+        persistent_playlist_id: value.persistent_playlist_id,
+        timestamp: value.timestamp,
+        title: value.title,
+        is_master: value.is_master,
+        tracks: value.tracks.iter().map(|id| get_track(db, *id)).filter(|t| t.is_ok()).map(|t| t.unwrap()).collect(),
+    };
+    Ok(playlist.into())
+}
+
+pub fn get_all_playlists(db: &Database) -> Result<Vec<DBPlaylist>, Error> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(PLAYLISTS)?;
+    Ok(table
+        .iter()
+        .unwrap()
+        .flatten()
+        .map(|d| bincode::deserialize(&d.1.value()).unwrap())
+        .collect::<Vec<Playlist>>()
+        .iter()
+        .map(|p| DBPlaylist{
+            persistent_playlist_id: p.persistent_playlist_id,
+            timestamp: p.timestamp,
+            title: p.title.clone(),
+            is_master: p.is_master,
+            tracks: p.tracks.iter().map(|id| get_track(db, *id)).filter(|t| t.is_ok()).map(|t| t.unwrap()).collect()
+        })
+        .collect())
 }
 
 pub fn insert_track(db: &Database, track: Track) -> Result<(), Error> {

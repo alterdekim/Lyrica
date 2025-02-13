@@ -10,19 +10,15 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{
-    config::{
-        get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration,
-    },
-    db::{self, Track},
-    dlp::{self, DownloadProgress},
-    AppState,
-};
+use crate::{config::{
+    get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration,
+}, db::{self, Track}, dlp::{self, DownloadProgress}, util, AppState};
+use crate::db::{DBPlaylist, Playlist};
 
 pub enum AppEvent {
     SearchIPod,
     IPodNotFound,
-    ITunesParsed(Vec<Track>),
+    ITunesParsed(Vec<DBPlaylist>),
     SoundcloudGot(CloudPlaylists),
     DownloadPlaylist(CloudPlaylist),
     CurrentProgress(DownloadProgress),
@@ -38,6 +34,8 @@ pub fn initialize_async_service(
     tokio::spawn(async move {
         let _ = std::fs::create_dir_all(get_configs_dir());
 
+        let mut ipod_db = None;
+
         let database = db::init_db();
 
         let mut receiver = receiver;
@@ -49,13 +47,13 @@ pub fn initialize_async_service(
                     if let Some(request) = r {
                         match request {
                             AppEvent::SearchIPod => {
-                                /*if let Some(p) = util::search_ipod() {
-                                    let _ = sender.send(AppEvent::IPodFound(p)).await;
+                                if let Some(p) = util::search_ipod() {
+                                    let _ = sender.send(AppEvent::SwitchScreen(AppState::MainScreen)).await;
+                                    ipod_db = Some(p.clone());
+                                    parse_itunes(&database, &sender, p).await;
                                 } else {
                                     let _ = sender.send(AppEvent::IPodNotFound).await;
-                                }*/
-                                let _ = sender.send(AppEvent::SwitchScreen(AppState::MainScreen)).await;
-                                parse_itunes(&database, &sender, "/Users/michael/Documents/ipod/iTunes/iTunesDB".to_string()).await;
+                                }
                             },
                             AppEvent::DownloadPlaylist(playlist) => download_playlist(playlist, &database, &sender).await,
                             _ => {}
@@ -92,12 +90,11 @@ async fn download_playlist(
 }
 
 async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: String) {
-    // todo: parse itunes
     let cd = get_temp_itunesdb();
-    let p: PathBuf = Path::new(&path).into();
-    // p.push("iPod_Control");
-    //   p.push("iTunes");
-    //  p.set_file_name("iTunesDB");
+    let mut p: PathBuf = Path::new(&path).into();
+    p.push("iPod_Control");
+    p.push("iTunes");
+    p.set_file_name("iTunesDB");
     let _ = std::fs::copy(p, &cd);
     let mut file = File::open(cd).await.unwrap();
     let mut contents = vec![];
@@ -111,9 +108,22 @@ async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: Stri
         }
     }
 
+    if let XSomeList::Playlists(playlists) = &xdb.find_dataset(3).child {
+        for playlist in playlists {
+            let pl = Playlist {
+                persistent_playlist_id: playlist.data.persistent_playlist_id,
+                timestamp: playlist.data.timestamp,
+                title: String::new() ,
+                is_master: playlist.data.is_master_playlist_flag != 0,
+                tracks: playlist.elems.iter().map(|e| e.0.track_id).collect()
+            };
+            let _ = db::insert_playlist(database, pl);
+        }
+    }
+
     let _ = sender
         .send(AppEvent::ITunesParsed(
-            db::get_all_tracks(database).unwrap(),
+            db::get_all_playlists(database).unwrap(),
         ))
         .await;
 
