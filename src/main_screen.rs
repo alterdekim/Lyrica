@@ -105,6 +105,7 @@ impl MainScreen {
     fn update_max_rows(&mut self) {
         self.max_rows = match self.selected_tab {
             1 => self.soundcloud.as_deref().unwrap_or(&[]).len(),
+            2 => self.tracks.as_deref().unwrap_or(&[]).len(),
             _ => 0,
         }
         .try_into()
