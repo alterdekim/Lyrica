@@ -13,9 +13,12 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::{db::Track, screen::AppScreen, sync::AppEvent, theme::Theme};
 
 pub struct MainScreen {
+    mode: bool,
     selected_tab: i8,
-    selected_row: i32,
-    max_rows: i32,
+    selected_playlist: i32,
+    selected_song: i32,
+    max_pls: i32,
+    max_songs: i32,
     tab_titles: Vec<String>,
     soundcloud: Option<Vec<CloudPlaylist>>,
     pub tracks: Option<Vec<Track>>,
@@ -30,6 +33,7 @@ impl AppScreen for MainScreen {
             KeyCode::Up => self.previous_row(),
             KeyCode::Down => self.next_row(),
             KeyCode::F(6) => self.download_row(),
+            KeyCode::Tab => self.switch_mode(),
             _ => {}
         }
     }
@@ -87,8 +91,11 @@ impl AppScreen for MainScreen {
 impl MainScreen {
     pub fn new(sender: UnboundedSender<AppEvent>) -> Self {
         MainScreen {
-            selected_row: 0,
-            max_rows: 0,
+            mode: false,
+            selected_playlist: 0,
+            selected_song: 0,
+            max_pls: 0,
+            max_songs: 0,
             soundcloud: None,
             tracks: None,
             selected_tab: 0,
@@ -103,19 +110,44 @@ impl MainScreen {
     }
 
     fn update_max_rows(&mut self) {
-        self.max_rows = match self.selected_tab {
+        self.selected_song = 0;
+        self.selected_playlist = 0;
+        self.max_songs = 0;
+        self.max_pls = match self.selected_tab {
             1 => self.soundcloud.as_deref().unwrap_or(&[]).len(),
             2 => self.tracks.as_deref().unwrap_or(&[]).len(),
             _ => 0,
         }
         .try_into()
         .unwrap();
+        self.update_max_songs();
+    }
+
+    fn update_max_songs(&mut self) {
+        if self.max_pls > 0 {
+            self.max_songs = match self.selected_tab {
+                1 => self
+                    .soundcloud
+                    .as_deref()
+                    .unwrap()
+                    .get(self.selected_playlist as usize)
+                    .unwrap()
+                    .tracks
+                    .len(),
+                _ => 0,
+            }
+            .try_into()
+            .unwrap();
+
+            self.selected_song = 0;
+        }
+    }
+
+    fn switch_mode(&mut self) {
+        self.mode = !self.mode;
     }
 
     fn next_tab(&mut self) {
-        if self.selected_tab < 0 {
-            return;
-        }
         self.selected_tab = std::cmp::min(
             self.selected_tab + 1,
             (self.tab_titles.len() - 1).try_into().unwrap(),
@@ -124,19 +156,29 @@ impl MainScreen {
     }
 
     fn previous_tab(&mut self) {
-        if self.selected_tab < 0 {
-            return;
-        }
         self.selected_tab = std::cmp::max(0, self.selected_tab - 1);
         self.update_max_rows();
     }
 
     fn previous_row(&mut self) {
-        self.selected_row = std::cmp::max(0, self.selected_row - 1);
+        match self.mode {
+            true => self.selected_song = std::cmp::max(0, self.selected_song - 1),
+            false => {
+                self.selected_playlist = std::cmp::max(0, self.selected_playlist - 1);
+                self.update_max_songs();
+            }
+        }
     }
 
     fn next_row(&mut self) {
-        self.selected_row = std::cmp::min(self.selected_row + 1, self.max_rows - 1);
+        match self.mode {
+            true => self.selected_song = std::cmp::min(self.selected_song + 1, self.max_songs - 1),
+            false => {
+                self.selected_playlist =
+                    std::cmp::min(self.selected_playlist + 1, self.max_pls - 1);
+                self.update_max_songs();
+            }
+        }
     }
 
     fn download_row(&mut self) {
@@ -146,7 +188,7 @@ impl MainScreen {
                 .soundcloud
                 .as_ref()
                 .unwrap()
-                .get(self.selected_row as usize)
+                .get(self.selected_playlist as usize)
                 .unwrap()
                 .clone();
             let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist));
@@ -155,10 +197,12 @@ impl MainScreen {
 
     pub fn set_soundcloud_playlists(&mut self, pl: CloudPlaylists) {
         self.soundcloud = Some(pl.collection);
+        if self.selected_tab == 1 {
+            self.update_max_rows();
+        }
     }
 
-    fn render_tab(&self, frame: &mut Frame, area: Rect) /*-> Table<'_>*/
-    {
+    fn render_tab(&self, frame: &mut Frame, area: Rect) {
         let rows = match self.selected_tab {
             1 => {
                 // SC
@@ -177,7 +221,7 @@ impl MainScreen {
                             format!("{}", date.format("%Y-%m-%d %H:%M")),
                             "NO".to_string(),
                         ]);
-                        if self.selected_row == i as i32 {
+                        if self.selected_playlist == i as i32 {
                             row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
                         }
                         v.push(row);
@@ -201,7 +245,65 @@ impl MainScreen {
                             track.bitrate.to_string(),
                             format!("{:X}", track.dbid),
                         ]);
-                        if self.selected_row == i as i32 {
+                        if self.selected_playlist == i as i32 {
+                            row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
+                        }
+                        v.push(row);
+                    }
+                }
+                v
+            }
+            _ => Vec::new(),
+        };
+
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(30), // Playlists
+                Constraint::Min(0),         // Tracks
+            ])
+            .split(area);
+
+        // Create the table
+        let table = Table::new(
+            rows,
+            &[
+                Constraint::Length(3),      // ID column
+                Constraint::Percentage(50), // Playlist name column
+                Constraint::Percentage(20), // Song count column
+                Constraint::Percentage(30),
+                Constraint::Length(2),
+            ],
+        )
+        .block(Block::default().borders(Borders::ALL).title(" Playlists "))
+        .style(Style::default().fg(Color::Black));
+
+        frame.render_widget(table, chunks[0]);
+
+        let rows = match self.selected_tab {
+            1 => {
+                // local
+                let mut v = Vec::new();
+                v.push(
+                    Row::new(vec!["Id", "Title", "Artist", "Duration", "Genre"])
+                        .style(Style::default().fg(Color::Gray)),
+                );
+                if let Some(pls) = &self.soundcloud {
+                    let s = &pls.get(self.selected_playlist as usize).unwrap().tracks;
+                    for (i, track) in s.iter().enumerate() {
+                        let mut row = Row::new(vec![
+                            track.id.to_string(),
+                            track.title.as_deref().unwrap().to_string(),
+                            track
+                                .user
+                                .clone()
+                                .unwrap()
+                                .username
+                                .unwrap_or(track.user.as_ref().unwrap().permalink.clone()),
+                            track.duration.unwrap_or(0).to_string(),
+                            track.genre.as_ref().unwrap_or(&String::new()).to_string(),
+                        ]);
+                        if self.selected_song == i as i32 {
                             row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
                         }
                         v.push(row);
@@ -219,13 +321,13 @@ impl MainScreen {
                 Constraint::Length(3),      // ID column
                 Constraint::Percentage(50), // Playlist name column
                 Constraint::Percentage(20), // Song count column
-                Constraint::Percentage(30),
-                Constraint::Length(2),
+                Constraint::Length(5),
+                Constraint::Min(0),
             ],
         )
-        .block(Block::default().borders(Borders::ALL).title(" Playlists "))
+        .block(Block::default().borders(Borders::ALL).title(" Songs "))
         .style(Style::default().fg(Color::Black));
 
-        frame.render_widget(table, area);
+        frame.render_widget(table, chunks[1]);
     }
 }
