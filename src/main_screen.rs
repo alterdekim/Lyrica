@@ -333,7 +333,7 @@ impl MainScreen {
                         let mut row = Row::new(vec![
                             track.unique_id.to_string(),
                             track.title.clone(),
-                            track.artist.clone(),
+                            track.location.clone(),
                             track.bitrate.to_string(),
                             track.genre.clone(),
                         ]);

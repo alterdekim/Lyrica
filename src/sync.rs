@@ -48,14 +48,14 @@ pub fn initialize_async_service(
                         match request {
                             AppEvent::SearchIPod => {
                                 if let Some(p) = util::search_ipod() {
-                                    let _ = sender.send(AppEvent::SwitchScreen(AppState::MainScreen)).await;
                                     ipod_db = Some(p.clone());
                                     parse_itunes(&database, &sender, p).await;
+                                    let _ = sender.send(AppEvent::SwitchScreen(AppState::MainScreen)).await;
                                 } else {
                                     let _ = sender.send(AppEvent::IPodNotFound).await;
                                 }
                             },
-                            AppEvent::DownloadPlaylist(playlist) => download_playlist(playlist, &database, &sender).await,
+                            AppEvent::DownloadPlaylist(playlist) => download_playlist(playlist, &database, &sender, ipod_db.as_ref().unwrap().clone()).await,
                             _ => {}
                         }
                     }
@@ -69,18 +69,37 @@ async fn download_playlist(
     playlist: CloudPlaylist,
     database: &Database,
     sender: &Sender<AppEvent>,
+    ipod_path: String
 ) {
     if let Ok(()) =
         dlp::download_from_soundcloud(&playlist.permalink_url, &get_temp_dl_dir(), sender.clone())
             .await
     {
         let tracks = playlist.tracks;
+
+        let mut p: PathBuf = Path::new(&ipod_path).into();
         for track in tracks {
             if track.title.is_none() {
                 continue;
             }
-            let mut t: Track = track.into();
+            let mut t: Track = track.clone().into();
             t.unique_id = db::get_last_track_id(database).unwrap_or(80) + 1;
+            let mut tp = PathBuf::new();
+            tp.push("iPod_Control");
+            tp.push("Music");
+            tp.push(["F", &format!("{:02}", &(t.unique_id % 100))].concat());
+            tp.push(format!("{:X}", t.unique_id));
+            tp.set_extension("mp3");
+            t.location = tp.to_str().unwrap().to_string().replace(r"/", ":").to_string();
+            let mut dest = p.clone();
+            dest.push(tp);
+
+            let mut track_path = get_temp_dl_dir();
+            track_path.push(track.id.to_string());
+            track_path.set_extension("mp3");
+
+            let _ = std::fs::copy(track_path, dest);
+
             let _ = db::insert_track(database, t);
         }
     }
@@ -94,7 +113,8 @@ async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: Stri
     let mut p: PathBuf = Path::new(&path).into();
     p.push("iPod_Control");
     p.push("iTunes");
-    p.set_file_name("iTunesDB");
+    p.push("iTunesDB");
+    println!("{}", p.to_str().unwrap());
     let _ = std::fs::copy(p, &cd);
     let mut file = File::open(cd).await.unwrap();
     let mut contents = vec![];

@@ -1,5 +1,5 @@
 use std::fs::File;
-
+use std::ops::Deref;
 use itunesdb::xobjects::{XArgument, XPlaylist, XTrackItem};
 use md5::{Digest, Md5};
 use redb::{Database, Error, ReadableTable, TableDefinition};
@@ -29,7 +29,7 @@ pub struct Track {
     has_artwork: u8,
     media_type: u32,
     pub title: String,
-    location: String,
+    pub location: String,
     album: String,
     pub artist: String,
     pub genre: String,
@@ -44,7 +44,7 @@ pub struct DBPlaylist {
     pub tracks: Vec<Track>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Playlist {
     pub persistent_playlist_id: u64,
     pub title: String,
@@ -177,6 +177,24 @@ pub fn insert_track(db: &Database, track: Track) -> Result<(), Error> {
         let uid = track.unique_id;
         let data = bincode::serialize(&track).unwrap();
         table.insert(uid, data)?;
+        
+        let read_txn = db.begin_read()?;
+        let table = read_txn.open_table(PLAYLISTS)?;
+        
+        let pls = table
+            .iter()
+            .unwrap()
+            .flatten()
+            .map(|d| bincode::deserialize(&d.1.value()).unwrap())
+            .collect::<Vec<Playlist>>();
+        
+        for pl in pls {
+            if !pl.is_master { continue }
+            let mut master = pl.clone();
+            master.tracks.push(uid);
+            insert_playlist(db, master);
+            break;
+        }
     }
     write_txn.commit()?;
     Ok(())
