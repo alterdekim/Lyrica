@@ -1,5 +1,6 @@
 use chrono::{DateTime, TimeZone, Utc};
 use crossterm::event::{KeyCode, KeyEvent};
+use itunesdb::xobjects::XPlaylist;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
@@ -10,8 +11,8 @@ use ratatui::{
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{db::Track, screen::AppScreen, sync::AppEvent, theme::Theme};
-use crate::db::DBPlaylist;
+use crate::{screen::AppScreen, sync::AppEvent, theme::Theme};
+use crate::sync::DBPlaylist;
 
 pub struct MainScreen {
     mode: bool,
@@ -246,11 +247,11 @@ impl MainScreen {
                 );
                 if let Some(s) = &self.playlists {
                     for (i, playlist) in s.iter().enumerate() {
-                        let date = Utc.timestamp_millis_opt(playlist.timestamp as i64).unwrap();
+                        let date = Utc.timestamp_millis_opt(playlist.data.timestamp as i64).unwrap();
                         let mut row = Row::new(vec![
-                            playlist.persistent_playlist_id.to_string(),
+                            playlist.data.persistent_playlist_id.to_string(),
                             "".to_string(),
-                            playlist.tracks.len().to_string(),
+                            playlist.elems.len().to_string(),
                             format!("{}", date.format("%Y-%m-%d %H:%M")),
                             "YES".to_string(),
                         ]);
@@ -328,7 +329,7 @@ impl MainScreen {
                         .style(Style::default().fg(Color::Gray)),
                 );
                 if let Some(pls) = &self.playlists {
-                    let s = &pls.get(self.selected_playlist as usize).unwrap().tracks;
+                    let s = &pls.get(self.selected_playlist as usize).unwrap().elems;
                     for (i, track) in s.iter().enumerate() {
                         let mut row = Row::new(vec![
                             track.unique_id.to_string(),

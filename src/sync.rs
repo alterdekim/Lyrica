@@ -1,7 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use itunesdb::xobjects::XSomeList;
-use redb::Database;
+use itunesdb::xobjects::{XDatabase, XTrackItem};
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
 use tokio::{
     fs::File,
@@ -12,8 +11,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{config::{
     get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration,
-}, db::{self, Track}, dlp::{self, DownloadProgress}, util, AppState};
-use crate::db::{DBPlaylist, Playlist};
+}, dlp::{self, DownloadProgress}, util, AppState};
 
 pub enum AppEvent {
     SearchIPod,
@@ -26,6 +24,13 @@ pub enum AppEvent {
     SwitchScreen(AppState),
 }
 
+pub struct DBPlaylist {
+    pub id: u64,
+    pub title: String,
+    pub timestamp: u32,
+    pub tracks: Vec<XTrackItem>
+}
+
 pub fn initialize_async_service(
     sender: Sender<AppEvent>,
     receiver: UnboundedReceiver<AppEvent>,
@@ -36,7 +41,7 @@ pub fn initialize_async_service(
 
         let mut ipod_db = None;
 
-        let database = db::init_db();
+        let mut database = None;
 
         let mut receiver = receiver;
 
@@ -49,13 +54,13 @@ pub fn initialize_async_service(
                             AppEvent::SearchIPod => {
                                 if let Some(p) = util::search_ipod() {
                                     ipod_db = Some(p.clone());
-                                    parse_itunes(&database, &sender, p).await;
+                                    database = Some(parse_itunes(&sender, p).await);
                                     let _ = sender.send(AppEvent::SwitchScreen(AppState::MainScreen)).await;
                                 } else {
                                     let _ = sender.send(AppEvent::IPodNotFound).await;
                                 }
                             },
-                            AppEvent::DownloadPlaylist(playlist) => download_playlist(playlist, &database, &sender, ipod_db.as_ref().unwrap().clone()).await,
+                            AppEvent::DownloadPlaylist(playlist) => download_playlist(playlist, &mut database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
                             _ => {}
                         }
                     }
@@ -67,7 +72,7 @@ pub fn initialize_async_service(
 
 async fn download_playlist(
     playlist: CloudPlaylist,
-    database: &Database,
+    database: &mut XDatabase,
     sender: &Sender<AppEvent>,
     ipod_path: String
 ) {
@@ -82,15 +87,15 @@ async fn download_playlist(
             if track.title.is_none() {
                 continue;
             }
-            let mut t: Track = track.clone().into();
-            t.unique_id = db::get_last_track_id(database).unwrap_or(80) + 1;
+            let mut t: XTrackItem = track.into();
+            t.data.unique_id = database.get_unique_id();
             let mut tp = PathBuf::new();
             tp.push("iPod_Control");
             tp.push("Music");
-            tp.push(["F", &format!("{:02}", &(t.unique_id % 100))].concat());
-            tp.push(format!("{:X}", t.unique_id));
+            tp.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
+            tp.push(format!("{:X}", t.data.unique_id));
             tp.set_extension("mp3");
-            t.location = tp.to_str().unwrap().to_string().replace(r"/", ":").to_string();
+            t.set_location(tp.to_str().unwrap().to_string().replace("/", ":").to_string());
             let mut dest = p.clone();
             dest.push(tp);
 
@@ -100,7 +105,7 @@ async fn download_playlist(
 
             let _ = std::fs::copy(track_path, dest);
 
-            let _ = db::insert_track(database, t);
+            let _ = database.add_track(t);
         }
     }
     let _ = sender
@@ -108,7 +113,17 @@ async fn download_playlist(
         .await;
 }
 
-async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: String) {
+fn get_playlists(db: &mut XDatabase) -> Vec<DBPlaylist> {
+    let pls = db.get_playlists(); // string arg type 1 - playlist title.
+    pls.iter()
+        .map(|t| DBPlaylist {
+            id: t.data.persistent_playlist_id,
+            title: t.get_title(),
+            timestamp: t.data.timestamp,
+            tracks: t.elems.iter().map(|(i, _a)| db.get_track(i.track_id)).filter(|t| t.is_some()).map(|t| t.unwrap().clone()).collect()}).collect()
+}
+
+async fn parse_itunes(sender: &Sender<AppEvent>, path: String) -> XDatabase {
     let cd = get_temp_itunesdb();
     let mut p: PathBuf = Path::new(&path).into();
     p.push("iPod_Control");
@@ -119,31 +134,11 @@ async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: Stri
     let mut file = File::open(cd).await.unwrap();
     let mut contents = vec![];
     file.read_to_end(&mut contents).await.unwrap();
-    let mut xdb = itunesdb::deserializer::parse_bytes(&contents);
-
-    if let XSomeList::TrackList(tracks) = &xdb.find_dataset(1).child {
-        for track in tracks {
-            let t: Track = track.clone().into();
-            let _ = db::insert_track(database, t);
-        }
-    }
-
-    if let XSomeList::Playlists(playlists) = &xdb.find_dataset(3).child {
-        for playlist in playlists {
-            let pl = Playlist {
-                persistent_playlist_id: playlist.data.persistent_playlist_id,
-                timestamp: playlist.data.timestamp,
-                title: String::new() ,
-                is_master: playlist.data.is_master_playlist_flag != 0,
-                tracks: playlist.elems.iter().map(|e| e.0.track_id).collect()
-            };
-            let _ = db::insert_playlist(database, pl);
-        }
-    }
+    let mut database = itunesdb::deserializer::parse_bytes(&contents);
 
     let _ = sender
         .send(AppEvent::ITunesParsed(
-            db::get_all_playlists(database).unwrap(),
+            get_playlists(&mut database),
         ))
         .await;
 
@@ -188,4 +183,6 @@ async fn parse_itunes(database: &Database, sender: &Sender<AppEvent>, path: Stri
             collection: playlists,
         }))
         .await;
+
+    database
 }
