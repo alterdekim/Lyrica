@@ -1,5 +1,4 @@
-use std::{collections::HashMap, error::Error, io};
-
+use crate::file_system::FileSystem;
 use crate::theme::Theme;
 use color_eyre::Result;
 use crossterm::{
@@ -19,6 +18,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use screen::AppScreen;
+use std::{collections::HashMap, error::Error, io};
 use sync::AppEvent;
 use tokio::sync::mpsc::{self, Receiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
@@ -66,6 +66,7 @@ impl Default for App {
         screens.insert(AppState::IPodWait, Box::new(WaitScreen::default()));
         screens.insert(AppState::MainScreen, Box::new(MainScreen::new(jx.clone())));
         screens.insert(AppState::LoadingScreen, Box::new(LoadingScreen::default()));
+        screens.insert(AppState::FileSystem, Box::new(FileSystem::default()));
 
         Self {
             receiver: rx,
