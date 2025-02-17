@@ -4,8 +4,8 @@
 
 Lightweight iPod manager, batteries included.
 
+#  
 
-# 
 <div align="center">
     <img src=""/>
     <p>
@@ -36,3 +36,11 @@ Lightweight iPod manager, batteries included.
 ```
 
 ### Manually
+
+## Todos
+
+- Implement scrollbox
+- Implement single song download
+- Implement import from file system
+- Implement artwork integration
+- Implement addition to fresh ipod (without any data)
