@@ -9,7 +9,7 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use loading_screen::LoadingScreen;
 use main_screen::MainScreen;
 use ratatui::{
@@ -18,6 +18,7 @@ use ratatui::{
     Frame, Terminal,
 };
 use screen::AppScreen;
+use std::time::Duration;
 use std::{collections::HashMap, error::Error, io};
 use sync::AppEvent;
 use tokio::sync::mpsc::{self, Receiver, UnboundedSender};
@@ -133,6 +134,9 @@ impl App {
                     }
                     _ => {}
                 }
+            }
+            _ = tokio::time::sleep(Duration::from_millis(200)) => {
+
             }
         }
     }

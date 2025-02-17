@@ -4,22 +4,21 @@ use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Row, Table, Tabs},
+    widgets::{Block, Borders, Paragraph, Tabs},
     Frame,
 };
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
 use tokio::sync::mpsc::UnboundedSender;
 
+use crate::component::table::SmartTable;
 use crate::sync::DBPlaylist;
 use crate::{screen::AppScreen, sync::AppEvent, theme::Theme, AppState};
 
 pub struct MainScreen {
     mode: bool,
     selected_tab: i8,
-    selected_playlist: i32,
-    selected_song: i32,
-    max_pls: i32,
-    max_songs: i32,
+    pl_table: SmartTable,
+    song_table: SmartTable,
     tab_titles: Vec<String>,
     soundcloud: Option<Vec<CloudPlaylist>>,
     playlists: Option<Vec<DBPlaylist>>,
@@ -33,17 +32,18 @@ impl AppScreen for MainScreen {
             KeyCode::Left => self.previous_tab(),
             KeyCode::Up => self.previous_row(),
             KeyCode::Down => self.next_row(),
-            KeyCode::F(6) => self.download_row(),
+            KeyCode::F(5) => self.download_row(),
             KeyCode::Tab => self.switch_mode(),
-            KeyCode::F(2) => {
-                self.sender
+            KeyCode::F(4) => {
+                let _ = self
+                    .sender
                     .send(AppEvent::SwitchScreen(AppState::FileSystem));
             }
             _ => {}
         }
     }
 
-    fn render(&self, frame: &mut Frame, theme: &Theme) {
+    fn render(&self, frame: &mut Frame, _theme: &Theme) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -76,9 +76,11 @@ impl AppScreen for MainScreen {
         let status_bar = Paragraph::new(Line::from(vec![
             "◄ ► to change tab".bold(),
             " | ".dark_gray(),
-            "<F5> SAVE FS".bold(),
+            "<TAB> SWITCH PANEL".bold(),
             " | ".dark_gray(),
-            "<F6> DL".bold(),
+            "<F4> FS MODE".bold(),
+            " | ".dark_gray(),
+            "<F5> DOWNLOAD".bold(),
             " | ".dark_gray(),
             "<F8> DEL".bold(),
             " | ".dark_gray(),
@@ -97,10 +99,8 @@ impl MainScreen {
     pub fn new(sender: UnboundedSender<AppEvent>) -> Self {
         MainScreen {
             mode: false,
-            selected_playlist: 0,
-            selected_song: 0,
-            max_pls: 0,
-            max_songs: 0,
+            pl_table: SmartTable::default(),
+            song_table: SmartTable::default(),
             soundcloud: None,
             playlists: None,
             selected_tab: 0,
@@ -114,42 +114,14 @@ impl MainScreen {
         }
     }
 
-    fn update_max_rows(&mut self) {
-        self.selected_song = 0;
-        self.selected_playlist = 0;
-        self.max_songs = 0;
-        self.max_pls = match self.selected_tab {
-            1 => self.soundcloud.as_deref().unwrap_or(&[]).len(),
-            2 => self.playlists.as_deref().unwrap_or(&[]).len(),
-            _ => 0,
-        }
-        .try_into()
-        .unwrap();
-        self.update_max_songs();
-    }
-
-    fn update_max_songs(&mut self) {
-        if self.max_pls > 0 {
-            self.max_songs = match self.selected_tab {
-                1 => self
-                    .soundcloud
-                    .as_deref()
-                    .unwrap()
-                    .get(self.selected_playlist as usize)
-                    .unwrap()
-                    .tracks
-                    .len(),
-                _ => 0,
-            }
-            .try_into()
-            .unwrap();
-
-            self.selected_song = 0;
-        }
-    }
-
     fn switch_mode(&mut self) {
-        self.mode = !self.mode;
+        self.set_mode(!self.mode);
+    }
+
+    fn set_mode(&mut self, mode: bool) {
+        self.mode = mode;
+        self.pl_table.set_checked(!self.mode);
+        self.song_table.set_checked(self.mode);
     }
 
     fn next_tab(&mut self) {
@@ -157,31 +129,30 @@ impl MainScreen {
             self.selected_tab + 1,
             (self.tab_titles.len() - 1).try_into().unwrap(),
         );
-        self.update_max_rows();
+        self.update_tables();
     }
 
     fn previous_tab(&mut self) {
         self.selected_tab = std::cmp::max(0, self.selected_tab - 1);
-        self.update_max_rows();
+        self.update_tables();
     }
 
     fn previous_row(&mut self) {
         match self.mode {
-            true => self.selected_song = std::cmp::max(0, self.selected_song - 1),
+            true => self.song_table.previous_row(),
             false => {
-                self.selected_playlist = std::cmp::max(0, self.selected_playlist - 1);
-                self.update_max_songs();
+                self.pl_table.previous_row();
+                self.update_songs();
             }
         }
     }
 
     fn next_row(&mut self) {
         match self.mode {
-            true => self.selected_song = std::cmp::min(self.selected_song + 1, self.max_songs - 1),
+            true => self.song_table.next_row(),
             false => {
-                self.selected_playlist =
-                    std::cmp::min(self.selected_playlist + 1, self.max_pls - 1);
-                self.update_max_songs();
+                self.pl_table.next_row();
+                self.update_songs();
             }
         }
     }
@@ -193,7 +164,7 @@ impl MainScreen {
                 .soundcloud
                 .as_ref()
                 .unwrap()
-                .get(self.selected_playlist as usize)
+                .get(self.pl_table.selected_row())
                 .unwrap()
                 .clone();
             let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist));
@@ -203,72 +174,165 @@ impl MainScreen {
     pub fn set_soundcloud_playlists(&mut self, pl: CloudPlaylists) {
         self.soundcloud = Some(pl.collection);
         if self.selected_tab == 1 {
-            self.update_max_rows();
+            self.update_tables();
         }
     }
 
     pub fn set_itunes(&mut self, pl: Vec<DBPlaylist>) {
         self.playlists = Some(pl);
         if self.selected_tab == 2 {
-            self.update_max_rows();
+            self.update_tables();
+        }
+    }
+
+    fn update_tables(&mut self) {
+        self.set_mode(false);
+
+        self.pl_table = SmartTable::new(
+            ["Id", "Title", "Songs Count", "Date", "IS"]
+                .iter_mut()
+                .map(|s| s.to_string())
+                .collect(),
+            [
+                Constraint::Length(3),      // ID column
+                Constraint::Percentage(50), // Playlist name column
+                Constraint::Percentage(20), // Song count column
+                Constraint::Percentage(30),
+                Constraint::Length(2),
+            ]
+            .to_vec(),
+        );
+
+        let data = match self.selected_tab {
+            1 => {
+                if let Some(sc) = &self.soundcloud {
+                    sc.iter()
+                        .map(|playlist| {
+                            let date: DateTime<Utc> = playlist.created_at.parse().unwrap();
+                            vec![
+                                playlist.id.to_string(),
+                                playlist.title.clone(),
+                                [playlist.track_count.to_string(), " songs".to_string()].concat(),
+                                format!("{}", date.format("%Y-%m-%d %H:%M")),
+                                "NO".to_string(),
+                            ]
+                        })
+                        .collect::<Vec<Vec<String>>>()
+                } else {
+                    Vec::new()
+                }
+            }
+            2 => {
+                if let Some(it) = &self.playlists {
+                    it.iter()
+                        .map(|playlist| {
+                            let date = Utc.timestamp_millis_opt(playlist.timestamp as i64).unwrap();
+                            vec![
+                                playlist.id.to_string(),
+                                "".to_string(),
+                                playlist.tracks.len().to_string(),
+                                format!("{}", date.format("%Y-%m-%d %H:%M")),
+                                "YES".to_string(),
+                            ]
+                        })
+                        .collect::<Vec<Vec<String>>>()
+                } else {
+                    Vec::new()
+                }
+            }
+            _ => {
+                self.pl_table = SmartTable::default();
+                Vec::new()
+            }
+        };
+        self.pl_table.set_data(data);
+        self.pl_table.set_title("Playlists".to_string());
+        self.update_songs();
+    }
+
+    fn update_songs(&mut self) {
+        let constraints = [
+            Constraint::Length(3),      // ID column
+            Constraint::Percentage(50), // Playlist name column
+            Constraint::Percentage(20), // Song count column
+            Constraint::Length(5),
+            Constraint::Min(0),
+        ]
+        .to_vec();
+
+        match self.selected_tab {
+            1 => {
+                self.song_table = SmartTable::new(
+                    ["Id", "Title", "Artist", "Duration", "Genre"]
+                        .iter_mut()
+                        .map(|s| s.to_string())
+                        .collect(),
+                    constraints,
+                );
+                self.set_mode(self.mode);
+
+                if let Some(pls) = &self.soundcloud {
+                    let s = &pls.get(self.pl_table.selected_row()).unwrap().tracks;
+                    let data = s
+                        .iter()
+                        .map(|track| {
+                            vec![
+                                track.id.to_string(),
+                                track.title.as_deref().unwrap().to_string(),
+                                track
+                                    .user
+                                    .clone()
+                                    .unwrap()
+                                    .username
+                                    .unwrap_or(track.user.as_ref().unwrap().permalink.clone()),
+                                track.duration.unwrap_or(0).to_string(),
+                                track.genre.as_ref().unwrap_or(&String::new()).to_string(),
+                            ]
+                        })
+                        .collect::<Vec<Vec<String>>>();
+
+                    self.song_table.set_data(data);
+                }
+                self.song_table.set_title(" Songs ".to_string());
+            }
+            2 => {
+                self.song_table = SmartTable::new(
+                    ["Id", "Title", "Artist", "Bitrate", "Genre"]
+                        .iter_mut()
+                        .map(|s| s.to_string())
+                        .collect(),
+                    constraints,
+                );
+                self.set_mode(self.mode);
+
+                if let Some(pls) = &self.playlists {
+                    let s = &pls.get(self.pl_table.selected_row()).unwrap().tracks;
+                    let data = s
+                        .iter()
+                        .map(|track| {
+                            vec![
+                                track.data.unique_id.to_string(),
+                                track.get_title(),
+                                track.get_location(),
+                                track.data.bitrate.to_string(),
+                                track.get_genre(),
+                            ]
+                        })
+                        .collect::<Vec<Vec<String>>>();
+
+                    self.song_table.set_data(data);
+                }
+
+                self.song_table.set_title(" Songs ".to_string());
+            }
+            _ => {
+                self.song_table = SmartTable::default();
+                self.set_mode(self.mode);
+            }
         }
     }
 
     fn render_tab(&self, frame: &mut Frame, area: Rect) {
-        let rows = match self.selected_tab {
-            1 => {
-                // SC
-                let mut v = Vec::new();
-                v.push(
-                    Row::new(vec!["Id", "Title", "Songs Count", "Date", "IS"])
-                        .style(Style::default().fg(Color::Gray)),
-                );
-                if let Some(s) = &self.soundcloud {
-                    for (i, playlist) in s.iter().enumerate() {
-                        let date: DateTime<Utc> = playlist.created_at.parse().unwrap();
-                        let mut row = Row::new(vec![
-                            playlist.id.to_string(),
-                            playlist.title.clone(),
-                            [playlist.track_count.to_string(), " songs".to_string()].concat(),
-                            format!("{}", date.format("%Y-%m-%d %H:%M")),
-                            "NO".to_string(),
-                        ]);
-                        if self.selected_playlist == i as i32 {
-                            row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
-                        }
-                        v.push(row);
-                    }
-                }
-                v
-            }
-            2 => {
-                // local
-                let mut v = Vec::new();
-                v.push(
-                    Row::new(vec!["Id", "Title", "Songs Count", "Date", "IS"])
-                        .style(Style::default().fg(Color::Gray)),
-                );
-                if let Some(s) = &self.playlists {
-                    for (i, playlist) in s.iter().enumerate() {
-                        let date = Utc.timestamp_millis_opt(playlist.timestamp as i64).unwrap();
-                        let mut row = Row::new(vec![
-                            playlist.id.to_string(),
-                            "".to_string(),
-                            playlist.tracks.len().to_string(),
-                            format!("{}", date.format("%Y-%m-%d %H:%M")),
-                            "YES".to_string(),
-                        ]);
-                        if self.selected_playlist == i as i32 {
-                            row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
-                        }
-                        v.push(row);
-                    }
-                }
-                v
-            }
-            _ => Vec::new(),
-        };
-
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -277,99 +341,7 @@ impl MainScreen {
             ])
             .split(area);
 
-        // Create the table
-        let table = Table::new(
-            rows,
-            &[
-                Constraint::Length(3),      // ID column
-                Constraint::Percentage(50), // Playlist name column
-                Constraint::Percentage(20), // Song count column
-                Constraint::Percentage(30),
-                Constraint::Length(2),
-            ],
-        )
-        .block(Block::default().borders(Borders::ALL).title(" Playlists "))
-        .style(Style::default().fg(Color::Black));
-
-        frame.render_widget(table, chunks[0]);
-
-        let mut rows = match self.selected_tab {
-            1 => {
-                // sc
-                let mut v = Vec::new();
-                v.push(
-                    Row::new(vec!["Id", "Title", "Artist", "Duration", "Genre"])
-                        .style(Style::default().fg(Color::Gray)),
-                );
-                if let Some(pls) = &self.soundcloud {
-                    let s = &pls.get(self.selected_playlist as usize).unwrap().tracks;
-                    for (i, track) in s.iter().enumerate() {
-                        let mut row = Row::new(vec![
-                            track.id.to_string(),
-                            track.title.as_deref().unwrap().to_string(),
-                            track
-                                .user
-                                .clone()
-                                .unwrap()
-                                .username
-                                .unwrap_or(track.user.as_ref().unwrap().permalink.clone()),
-                            track.duration.unwrap_or(0).to_string(),
-                            track.genre.as_ref().unwrap_or(&String::new()).to_string(),
-                        ]);
-                        if self.selected_song == i as i32 {
-                            row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
-                        }
-                        v.push(row);
-                    }
-                }
-                v
-            }
-            2 => {
-                // local
-                let mut v = Vec::new();
-                v.push(
-                    Row::new(vec!["Id", "Title", "Artist", "Bitrate", "Genre"])
-                        .style(Style::default().fg(Color::Gray)),
-                );
-                if let Some(pls) = &self.playlists {
-                    let s = &pls.get(self.selected_playlist as usize).unwrap().tracks;
-                    for (i, track) in s.iter().enumerate() {
-                        let mut row = Row::new(vec![
-                            track.data.unique_id.to_string(),
-                            track.get_title(),
-                            track.get_location(),
-                            track.data.bitrate.to_string(),
-                            track.get_genre(),
-                        ]);
-                        if self.selected_song == i as i32 {
-                            row = row.style(Style::default().bg(Color::LightBlue).fg(Color::White));
-                        }
-                        v.push(row);
-                    }
-                }
-                v
-            }
-            _ => Vec::new(),
-        };
-
-        if chunks[1].rows().count() <= self.selected_song as usize {
-            rows = rows[self.selected_song as usize..].to_vec();
-        }
-
-        // Create the table
-        let table = Table::new(
-            rows,
-            &[
-                Constraint::Length(3),      // ID column
-                Constraint::Percentage(50), // Playlist name column
-                Constraint::Percentage(20), // Song count column
-                Constraint::Length(5),
-                Constraint::Min(0),
-            ],
-        )
-        .block(Block::default().borders(Borders::ALL).title(" Songs "))
-        .style(Style::default().fg(Color::Black));
-
-        frame.render_widget(table, chunks[1]);
+        self.pl_table.render(frame, chunks[0]);
+        self.song_table.render(frame, chunks[1]);
     }
 }

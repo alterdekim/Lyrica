@@ -45,7 +45,7 @@ impl AppScreen for FileSystem {
         }
     }
 
-    fn render(&self, frame: &mut ratatui::Frame, theme: &Theme) {
+    fn render(&self, frame: &mut Frame, _theme: &Theme) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([

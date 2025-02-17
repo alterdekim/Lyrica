@@ -4,7 +4,9 @@ pub mod table {
     use ratatui::widgets::{Block, Borders, Row, Table};
     use ratatui::Frame;
 
+    #[derive(Default)]
     pub struct SmartTable {
+        is_checked: bool,
         header: Vec<String>,
         data: Vec<Vec<String>>,
         constraints: Vec<Constraint>,
@@ -15,12 +17,17 @@ pub mod table {
     impl SmartTable {
         pub fn new(header: Vec<String>, constraints: Vec<Constraint>) -> Self {
             Self {
+                is_checked: true,
                 header,
                 data: Vec::new(),
                 constraints,
                 selected_row: 0,
                 title: String::new(),
             }
+        }
+
+        pub fn set_checked(&mut self, checked: bool) {
+            self.is_checked = checked;
         }
 
         pub fn set_data(&mut self, data: Vec<Vec<String>>) {
@@ -49,14 +56,22 @@ pub mod table {
             for (i, entry) in self.data.iter().enumerate() {
                 v.push(
                     Row::new(entry.clone()).style(if self.selected_row as usize == i {
-                        Style::default().bg(Color::LightBlue).fg(Color::White)
+                        Style::default()
+                            .bg(if self.is_checked {
+                                Color::LightBlue
+                            } else {
+                                Color::Gray
+                            })
+                            .fg(Color::White)
                     } else {
                         Style::default()
                     }),
                 );
             }
 
-            if self.selected_row as usize > area.rows().count() - 4 {
+            if self.selected_row as usize > area.rows().count() - 4
+                && self.selected_row - ((area.rows().count() - 4) as i32) >= 0
+            {
                 v = v[(self.selected_row as usize - (area.rows().count() - 4))..].to_vec();
             }
 
