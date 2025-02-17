@@ -1,5 +1,6 @@
 use crate::component::table::SmartTable;
-use crate::{screen::AppScreen, theme::Theme};
+use crate::sync::AppEvent;
+use crate::{screen::AppScreen, theme::Theme, AppState};
 use chrono::{DateTime, Utc};
 use crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -10,30 +11,11 @@ use std::cmp::Ordering;
 use std::fs::DirEntry;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
+use tokio::sync::mpsc::UnboundedSender;
 
 pub struct FileSystem {
     table: SmartTable,
-}
-
-impl Default for FileSystem {
-    fn default() -> Self {
-        let table = SmartTable::new(
-            ["Name", "Type", "Size", "Modified"]
-                .iter_mut()
-                .map(|s| s.to_string())
-                .collect(),
-            vec![
-                Constraint::Percentage(50),
-                Constraint::Length(5),
-                Constraint::Percentage(20),
-                Constraint::Percentage(30),
-            ],
-        );
-
-        let mut a = Self { table };
-        a.get_path(dirs::document_dir().unwrap());
-        a
-    }
+    sender: UnboundedSender<AppEvent>,
 }
 
 impl AppScreen for FileSystem {
@@ -41,6 +23,11 @@ impl AppScreen for FileSystem {
         match key_event.code {
             KeyCode::Up => self.table.previous_row(),
             KeyCode::Down => self.table.next_row(),
+            KeyCode::F(4) => {
+                let _ = self
+                    .sender
+                    .send(AppEvent::SwitchScreen(AppState::MainScreen));
+            }
             _ => {}
         }
     }
@@ -58,6 +45,8 @@ impl AppScreen for FileSystem {
 
         // Render Status Bar
         let status_bar = Paragraph::new(Line::from(vec![
+            "<F4> SWITCH TO NORMAL".bold(),
+            " | ".dark_gray(),
             "<F5> SAVE AS PLAYLIST".bold(),
             " | ".dark_gray(),
             "<F6> SAVE AS IS".bold(),
@@ -78,6 +67,25 @@ impl AppScreen for FileSystem {
 }
 
 impl FileSystem {
+    pub fn new(sender: UnboundedSender<AppEvent>) -> Self {
+        let table = SmartTable::new(
+            ["Name", "Type", "Size", "Modified"]
+                .iter_mut()
+                .map(|s| s.to_string())
+                .collect(),
+            vec![
+                Constraint::Percentage(50),
+                Constraint::Length(5),
+                Constraint::Percentage(20),
+                Constraint::Percentage(30),
+            ],
+        );
+
+        let mut a = Self { table, sender };
+        a.get_path(dirs::document_dir().unwrap());
+        a
+    }
+
     fn get_path(&mut self, p: PathBuf) {
         let paths = std::fs::read_dir(&p).unwrap();
         let mut dir = paths

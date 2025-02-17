@@ -160,14 +160,31 @@ impl MainScreen {
     fn download_row(&mut self) {
         if self.selected_tab == 1 {
             // SC
-            let playlist = self
-                .soundcloud
-                .as_ref()
-                .unwrap()
-                .get(self.pl_table.selected_row())
-                .unwrap()
-                .clone();
-            let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist));
+            match self.mode {
+                false => {
+                    let playlist = self
+                        .soundcloud
+                        .as_ref()
+                        .unwrap()
+                        .get(self.pl_table.selected_row())
+                        .unwrap()
+                        .clone();
+                    let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist));
+                }
+                true => {
+                    let track = self
+                        .soundcloud
+                        .as_ref()
+                        .unwrap()
+                        .get(self.pl_table.selected_row())
+                        .unwrap()
+                        .tracks
+                        .get(self.song_table.selected_row())
+                        .unwrap()
+                        .clone();
+                    let _ = self.sender.send(AppEvent::DownloadTrack(track));
+                }
+            }
         }
     }
 

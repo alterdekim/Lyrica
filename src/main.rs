@@ -68,7 +68,7 @@ impl Default for App {
         screens.insert(AppState::IPodWait, Box::new(WaitScreen::default()));
         screens.insert(AppState::MainScreen, Box::new(MainScreen::new(jx.clone())));
         screens.insert(AppState::LoadingScreen, Box::new(LoadingScreen::default()));
-        screens.insert(AppState::FileSystem, Box::new(FileSystem::default()));
+        screens.insert(AppState::FileSystem, Box::new(FileSystem::new(jx.clone())));
 
         Self {
             receiver: rx,
