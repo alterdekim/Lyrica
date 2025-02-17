@@ -24,6 +24,7 @@ use tokio::sync::mpsc::{self, Receiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
 use wait_screen::WaitScreen;
 
+mod component;
 mod config;
 mod dlp;
 mod file_system;
