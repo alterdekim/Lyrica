@@ -293,7 +293,7 @@ impl MainScreen {
 
         frame.render_widget(table, chunks[0]);
 
-        let rows = match self.selected_tab {
+        let mut rows = match self.selected_tab {
             1 => {
                 // sc
                 let mut v = Vec::new();
@@ -351,6 +351,10 @@ impl MainScreen {
             }
             _ => Vec::new(),
         };
+
+        if chunks[1].rows().count() <= self.selected_song as usize {
+            rows = rows[self.selected_song as usize..].to_vec();
+        }
 
         // Create the table
         let table = Table::new(

@@ -1,11 +1,25 @@
 use crate::{screen::AppScreen, theme::Theme};
+use chrono::{DateTime, Utc};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Color, Line, Style, Stylize};
 use ratatui::widgets::{Block, Borders, Paragraph, Row, Table};
 use ratatui::Frame;
+use std::cmp::Ordering;
+use std::fs::DirEntry;
+use std::os::unix::fs::MetadataExt;
+use std::path::PathBuf;
 
-#[derive(Default)]
-pub struct FileSystem {}
+pub struct FileSystem {
+    dir: Vec<DirEntry>,
+}
+
+impl Default for FileSystem {
+    fn default() -> Self {
+        let mut a = Self { dir: Vec::new() };
+        a.get_path(dirs::document_dir().unwrap());
+        a
+    }
+}
 
 impl AppScreen for FileSystem {
     fn handle_key_event(&mut self, key_event: crossterm::event::KeyEvent) {}
@@ -43,15 +57,39 @@ impl AppScreen for FileSystem {
 }
 
 impl FileSystem {
+    fn get_path(&mut self, p: PathBuf) {
+        let paths = std::fs::read_dir(p).unwrap();
+        self.dir = paths
+            .filter_map(|res| res.ok())
+            .filter(|p| p.path().extension().map_or(false, |ext| ext == "mp3") || p.path().is_dir())
+            .collect();
+        self.dir.sort_by(|a, b| {
+            if a.file_type().unwrap().is_dir() {
+                Ordering::Less
+            } else {
+                Ordering::Greater
+            }
+        });
+    }
+
     fn render_main(&self, frame: &mut Frame, area: Rect) {
         let mut v = vec![Row::new(vec!["Name", "Type", "Size", "Modified"])
             .style(Style::default().fg(Color::Gray))];
 
-        // move this out to make hdd not suffer
-        let paths = std::fs::read_dir("~/Documents").unwrap();
-
-        for path in paths {
-            v.push();
+        for entry in self.dir.iter() {
+            let datetime: DateTime<Utc> = entry.metadata().unwrap().modified().unwrap().into();
+            let datetime = datetime.format("%d/%m/%Y %T").to_string();
+            let size = entry.metadata().unwrap().size().to_string();
+            let file_type = entry.file_type().unwrap().is_file().to_string();
+            v.push(
+                Row::new(vec![
+                    entry.file_name().to_str().unwrap().to_string(),
+                    file_type,
+                    size,
+                    datetime,
+                ])
+                .style(Style::default()),
+            );
         }
 
         let table = Table::new(
