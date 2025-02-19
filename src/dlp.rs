@@ -1,4 +1,4 @@
-use std::{path::PathBuf, process::Stdio};
+use std::{io, path::PathBuf, process::Stdio};
 
 use regex::Regex;
 use serde::Deserialize;
@@ -22,7 +22,7 @@ pub async fn download_track_from_soundcloud(
     track_url: &str,
     download_dir: &PathBuf,
     sender: Sender<AppEvent>,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+) -> io::Result<()> {
     let _ = sender
         .send(AppEvent::SwitchScreen(crate::AppState::LoadingScreen))
         .await;
@@ -56,7 +56,7 @@ pub async fn download_track_from_soundcloud(
     let stdout = child.stdout.take().unwrap();
     let mut reader = BufReader::new(stdout).lines();
 
-    while let Some(line) = reader.next_line().await? {
+    while let Ok(Some(line)) = reader.next_line().await {
         if line.starts_with("{") {
             let progress: DownloadProgress = serde_json::from_str(&line).unwrap();
             let _ = sender.send(AppEvent::OverallProgress((0, 1))).await;
@@ -71,7 +71,7 @@ pub async fn download_from_soundcloud(
     playlist_url: &str,
     download_dir: &PathBuf,
     sender: Sender<AppEvent>,
-) -> std::result::Result<(), Box<dyn std::error::Error>> {
+) -> io::Result<()> {
     let _ = sender
         .send(AppEvent::SwitchScreen(crate::AppState::LoadingScreen))
         .await;
@@ -106,7 +106,7 @@ pub async fn download_from_soundcloud(
     let stdout = child.stdout.take().unwrap();
     let mut reader = BufReader::new(stdout).lines();
 
-    while let Some(line) = reader.next_line().await? {
+    while let Ok(Some(line)) = reader.next_line().await {
         match dl_rx.find(&line) {
             Some(m) => {
                 let mut s = m.as_str();

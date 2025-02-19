@@ -8,14 +8,23 @@ use ratatui::prelude::{Line, Stylize};
 use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use std::cmp::Ordering;
+use std::ffi::OsStr;
 use std::fs::DirEntry;
 use std::os::unix::fs::MetadataExt;
 use std::path::PathBuf;
 use tokio::sync::mpsc::UnboundedSender;
 
 pub struct FileSystem {
+    files: Vec<DirEntry>,
     table: SmartTable,
     sender: UnboundedSender<AppEvent>,
+}
+
+fn check_extension_comptability(ext: &OsStr) -> bool {
+    matches!(
+        ext.to_str().unwrap().to_lowercase().as_str(),
+        "mp3" | "m4a" | "wav" | "aiff" | "aif" | "aac"
+    )
 }
 
 impl AppScreen for FileSystem {
@@ -27,6 +36,9 @@ impl AppScreen for FileSystem {
                 let _ = self
                     .sender
                     .send(AppEvent::SwitchScreen(AppState::MainScreen));
+            }
+            KeyCode::F(5) => {
+                self.download_as_is();
             }
             _ => {}
         }
@@ -47,9 +59,9 @@ impl AppScreen for FileSystem {
         let status_bar = Paragraph::new(Line::from(vec![
             "<F4> SWITCH TO NORMAL".bold(),
             " | ".dark_gray(),
-            "<F5> SAVE AS PLAYLIST".bold(),
+            "<F5> SAVE AS IS".bold(),
             " | ".dark_gray(),
-            "<F6> SAVE AS IS".bold(),
+            "<F6> SAVE AS PLAYLIST".bold(),
             " | ".dark_gray(),
             "<F8> SELECT".bold(),
             " | ".dark_gray(),
@@ -81,7 +93,11 @@ impl FileSystem {
             ],
         );
 
-        let mut a = Self { table, sender };
+        let mut a = Self {
+            table,
+            sender,
+            files: Vec::new(),
+        };
         a.get_path(dirs::document_dir().unwrap());
         a
     }
@@ -90,7 +106,12 @@ impl FileSystem {
         let paths = std::fs::read_dir(&p).unwrap();
         let mut dir = paths
             .filter_map(|res| res.ok())
-            .filter(|p| p.path().extension().map_or(false, |ext| ext == "mp3") || p.path().is_dir())
+            .filter(|p| {
+                p.path()
+                    .extension()
+                    .map_or(false, check_extension_comptability)
+                    || p.path().is_dir()
+            })
             .collect::<Vec<DirEntry>>();
         dir.sort_by(|a, _b| {
             if a.file_type().unwrap().is_dir() {
@@ -100,7 +121,7 @@ impl FileSystem {
             }
         });
 
-        let dir = dir
+        let data = dir
             .iter()
             .map(|entry| {
                 let datetime: DateTime<Utc> = entry.metadata().unwrap().modified().unwrap().into();
@@ -116,9 +137,20 @@ impl FileSystem {
             })
             .collect::<Vec<Vec<String>>>();
 
-        self.table.set_data(dir);
+        self.files = dir;
+
+        self.table.set_data(data);
         self.table
             .set_title(p.iter().last().unwrap().to_str().unwrap().to_string());
+    }
+
+    fn download_as_is(&self) {
+        let entry = self.files.get(self.table.selected_row()).unwrap();
+        if entry.path().is_dir() {
+            todo!("Implement that later");
+        } else {
+            let _ = self.sender.send(AppEvent::LoadFromFS(entry.path()));
+        }
     }
 
     fn render_main(&self, frame: &mut Frame, area: Rect) {

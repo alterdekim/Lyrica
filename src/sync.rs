@@ -1,7 +1,9 @@
+use audiotags::Tag;
 use itunesdb::objects::{ListSortOrder, PlaylistItem};
 use itunesdb::serializer;
 use itunesdb::xobjects::{XDatabase, XPlArgument, XPlaylist, XTrackItem};
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists, CloudTrack};
+use std::error::Error;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tokio::{
@@ -29,6 +31,7 @@ pub enum AppEvent {
     CurrentProgress(DownloadProgress),
     OverallProgress((u32, u32)),
     SwitchScreen(AppState),
+    LoadFromFS(PathBuf),
 }
 
 pub struct DBPlaylist {
@@ -38,23 +41,24 @@ pub struct DBPlaylist {
     pub tracks: Vec<XTrackItem>,
 }
 
-fn track_from_soundcloud(value: &CloudTrack) -> XTrackItem {
+async fn track_from_soundcloud(value: &CloudTrack) -> Option<XTrackItem> {
     let mut track_path = get_temp_dl_dir();
     track_path.push(value.id.to_string());
     track_path.set_extension("mp3");
     let f = std::fs::File::open(&track_path).unwrap();
     let mut data = &std::fs::read(&track_path).unwrap()[..];
-    let (header, _samples) = puremp3::read_mp3(data).unwrap();
-
-    let duration = mp3_duration::from_read(&mut data).unwrap();
+    let audio_info = audio_file_info::from_path(track_path.to_str().unwrap())
+        .await
+        .unwrap();
+    let audio_info = audio_info.audio_file.tracks.get(0).unwrap();
 
     let mut track = XTrackItem::new(
         value.id as u32,
         f.metadata().unwrap().len() as u32,
-        duration.as_millis() as u32,
+        (audio_info.duration * 1000.0) as u32,
         0,
-        header.bitrate.bps() / 1000,
-        header.sample_rate.hz(),
+        audio_info.bit_rate as u32,
+        audio_info.sample_rate as u32,
         hash(),
         0,
     );
@@ -67,7 +71,7 @@ fn track_from_soundcloud(value: &CloudTrack) -> XTrackItem {
     );
     track.set_genre(value.genre.clone().unwrap());
     track.update_arg(6, String::from("MPEG audio file"));
-    track
+    Some(track)
 }
 
 // note: this hash function is used to make unique ids for each track. It doesn't aim to generate secure ones.
@@ -108,15 +112,16 @@ pub fn initialize_async_service(
                             AppEvent::SearchIPod => {
                                 if let Some(p) = util::search_ipod() {
                                     ipod_db = Some(p.clone());
-                                    database = Some(parse_itunes(&sender, p).await);
                                     let _ = sender.send(AppEvent::SwitchScreen(AppState::MainScreen)).await;
+                                    database = Some(parse_itunes(&sender, p).await);
                                 } else {
                                     let _ = sender.send(AppEvent::IPodNotFound).await;
                                 }
                             },
-                            AppEvent::DownloadPlaylist(playlist) => download_playlist(playlist, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
-                            AppEvent::DownloadTrack(track) => download_track(track, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
+                            AppEvent::DownloadPlaylist(playlist) => { download_playlist(playlist, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await; },
+                            AppEvent::DownloadTrack(track) => { download_track(track, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await; },
                             AppEvent::SwitchScreen(state) => { let _ = sender.send(AppEvent::SwitchScreen(state)).await;},
+                            AppEvent::LoadFromFS(path) => load_from_fs(path, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()),
                             _ => {}
                         }
                     }
@@ -124,6 +129,51 @@ pub fn initialize_async_service(
             }
         }
     });
+}
+
+fn load_from_fs(
+    path: PathBuf,
+    database: &mut XDatabase,
+    sender: &Sender<AppEvent>,
+    ipod_path: String,
+) {
+    let mut tag = Tag::new().read_from_path(path).unwrap();
+
+    let id = database.get_unique_id();
+
+    let mut track = XTrackItem::new(
+        id,
+        0,
+        (tag.duration().unwrap() / 1000.0) as u32,
+        tag.year().unwrap() as u32,
+        0,
+        0,
+        hash(),
+        0,
+    );
+    // TODO: implement check for every property
+    track.set_title(tag.title().unwrap().to_string());
+
+    let mut tp = PathBuf::new();
+    tp.push(":iPod_Control");
+    tp.push("Music");
+    tp.push(["F", &format!("{:02}", &(track.data.unique_id % 100))].concat());
+    tp.push(format!("{:X}", track.data.unique_id));
+    tp.set_extension("mp3");
+    track.set_location(
+        tp.to_str()
+            .unwrap()
+            .to_string()
+            .replace("/", ":")
+            .to_string(),
+    );
+    //track.update_arg(6);
+
+    track.set_genre(tag.genre().unwrap().to_string());
+    track.set_artist(tag.artist().unwrap().to_string());
+    track.set_album(tag.album().unwrap().title.to_string());
+
+    let cover = tag.album().unwrap().cover.unwrap();
 }
 
 async fn download_track(
@@ -141,36 +191,37 @@ async fn download_track(
     {
         let p: PathBuf = Path::new(&ipod_path).into();
 
-        let mut t: XTrackItem = track_from_soundcloud(&track);
-        t.data.unique_id = database.get_unique_id();
-        let mut tp = PathBuf::new();
-        tp.push(":iPod_Control");
-        tp.push("Music");
-        tp.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
-        tp.push(format!("{:X}", t.data.unique_id));
-        tp.set_extension("mp3");
-        t.set_location(
-            tp.to_str()
-                .unwrap()
-                .to_string()
-                .replace("/", ":")
-                .to_string(),
-        );
-        let mut dest = p.clone();
-        dest.push("iPod_Control");
-        dest.push("Music");
-        dest.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
-        let _ = std::fs::create_dir_all(dest.to_str().unwrap());
-        dest.push(format!("{:X}", t.data.unique_id));
-        dest.set_extension("mp3");
+        if let Some(mut t) = track_from_soundcloud(&track).await {
+            t.data.unique_id = database.get_unique_id();
+            let mut tp = PathBuf::new();
+            tp.push(":iPod_Control");
+            tp.push("Music");
+            tp.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
+            tp.push(format!("{:X}", t.data.unique_id));
+            tp.set_extension("mp3");
+            t.set_location(
+                tp.to_str()
+                    .unwrap()
+                    .to_string()
+                    .replace("/", ":")
+                    .to_string(),
+            );
+            let mut dest = p.clone();
+            dest.push("iPod_Control");
+            dest.push("Music");
+            dest.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
+            let _ = std::fs::create_dir_all(dest.to_str().unwrap());
+            dest.push(format!("{:X}", t.data.unique_id));
+            dest.set_extension("mp3");
 
-        let mut track_path = get_temp_dl_dir();
-        track_path.push(track.id.to_string());
-        track_path.set_extension("mp3");
+            let mut track_path = get_temp_dl_dir();
+            track_path.push(track.id.to_string());
+            track_path.set_extension("mp3");
 
-        let _ = std::fs::copy(track_path.to_str().unwrap(), dest.to_str().unwrap());
+            let _ = std::fs::copy(track_path.to_str().unwrap(), dest.to_str().unwrap());
 
-        database.add_track(t);
+            database.add_track(t);
+        }
     }
 
     let _ = sender
@@ -206,37 +257,38 @@ async fn download_playlist(
             if track.title.is_none() {
                 continue;
             }
-            let mut t: XTrackItem = track_from_soundcloud(&track);
-            t.data.unique_id = database.get_unique_id();
-            new_playlist.add_elem(t.data.unique_id);
-            let mut tp = PathBuf::new();
-            tp.push(":iPod_Control");
-            tp.push("Music");
-            tp.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
-            tp.push(format!("{:X}", t.data.unique_id));
-            tp.set_extension("mp3");
-            t.set_location(
-                tp.to_str()
-                    .unwrap()
-                    .to_string()
-                    .replace("/", ":")
-                    .to_string(),
-            );
-            let mut dest = p.clone();
-            dest.push("iPod_Control");
-            dest.push("Music");
-            dest.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
-            let _ = std::fs::create_dir_all(dest.to_str().unwrap());
-            dest.push(format!("{:X}", t.data.unique_id));
-            dest.set_extension("mp3");
+            if let Some(mut t) = track_from_soundcloud(&track).await {
+                t.data.unique_id = database.get_unique_id();
+                new_playlist.add_elem(t.data.unique_id);
+                let mut tp = PathBuf::new();
+                tp.push(":iPod_Control");
+                tp.push("Music");
+                tp.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
+                tp.push(format!("{:X}", t.data.unique_id));
+                tp.set_extension("mp3");
+                t.set_location(
+                    tp.to_str()
+                        .unwrap()
+                        .to_string()
+                        .replace("/", ":")
+                        .to_string(),
+                );
+                let mut dest = p.clone();
+                dest.push("iPod_Control");
+                dest.push("Music");
+                dest.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
+                let _ = std::fs::create_dir_all(dest.to_str().unwrap());
+                dest.push(format!("{:X}", t.data.unique_id));
+                dest.set_extension("mp3");
 
-            let mut track_path = get_temp_dl_dir();
-            track_path.push(track.id.to_string());
-            track_path.set_extension("mp3");
+                let mut track_path = get_temp_dl_dir();
+                track_path.push(track.id.to_string());
+                track_path.set_extension("mp3");
 
-            let _ = std::fs::copy(track_path.to_str().unwrap(), dest.to_str().unwrap());
+                let _ = std::fs::copy(track_path.to_str().unwrap(), dest.to_str().unwrap());
 
-            database.add_track(t);
+                database.add_track(t);
+            }
         }
 
         database.add_playlist(new_playlist);
@@ -334,4 +386,50 @@ async fn parse_itunes(sender: &Sender<AppEvent>, path: String) -> XDatabase {
         .await;
 
     database
+}
+
+mod audio_file_info {
+    use serde::{Deserialize, Serialize};
+    use std::process::Stdio;
+    use tokio::io::{AsyncReadExt, BufReader};
+    use tokio::process::Command;
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    pub struct AudioInfo {
+        pub audio_file: AudioFileInfo,
+    }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    pub struct AudioFileInfo {
+        pub file_name: String,
+        pub file_type: String,
+        pub tracks: Vec<AudioFileTrack>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    pub struct AudioFileTrack {
+        pub num_channels: u32,
+        pub sample_rate: u64,
+        pub format_type: String,
+        pub audio_bytes: u64,
+        pub duration: f64,
+        pub bit_rate: u64,
+    }
+
+    pub async fn from_path(p: &str) -> Option<AudioInfo> {
+        let mut command = Command::new("afinfo");
+        command.args(vec!["-x", p]);
+        command.stdout(Stdio::piped());
+        command.stderr(Stdio::null());
+
+        let mut child = command.spawn().unwrap();
+
+        let mut str = String::new();
+        let stdout = child.stdout.take().unwrap();
+        let size = BufReader::new(stdout)
+            .read_to_string(&mut str)
+            .await
+            .unwrap();
+        Some(serde_xml_rs::from_str(&str).unwrap())
+    }
 }
