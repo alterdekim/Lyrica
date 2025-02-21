@@ -1,10 +1,14 @@
-use audiotags::Tag;
+use audiotags::{Picture, Tag};
 use color_eyre::owo_colors::OwoColorize;
+use image::imageops::FilterType;
+use image::ImageReader;
+use itunesdb::artworkdb::aobjects::ADatabase;
 use itunesdb::objects::{ListSortOrder, PlaylistItem};
 use itunesdb::serializer;
 use itunesdb::xobjects::{XDatabase, XPlArgument, XPlaylist, XTrackItem};
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists, CloudTrack};
-use std::io::Write;
+use std::io::Read;
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use tokio::{
     fs::File,
@@ -13,6 +17,7 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
+use crate::util::IPodImage;
 use crate::{
     config::{
         get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration,
@@ -325,6 +330,8 @@ async fn load_from_fs(
         .unwrap();
     let audio_info = &audio_file.audio_file.tracks.track;
 
+    let song_dbid = hash();
+
     let mut track = XTrackItem::new(
         id,
         audio_info.audio_bytes as u32,
@@ -332,7 +339,7 @@ async fn load_from_fs(
         tag.year().unwrap_or(0) as u32,
         (audio_info.bit_rate / 1000) as u32,
         audio_info.sample_rate as u32,
-        hash(),
+        song_dbid,
         0,
     );
 
@@ -352,6 +359,26 @@ async fn load_from_fs(
         track.set_artist(artist.to_string());
     }
 
+    if let Some(cover) = tag.album_cover() {
+        let mut adb = get_artwork_db(&ipod_path);
+
+        let (small_img_name, large_img_name) = adb.add_images(song_dbid, id);
+
+        let mut dst = PathBuf::from(&ipod_path);
+        dst.push("iPod_Control");
+        dst.push("Artwork");
+
+        make_small_image(cover.clone(), &ipod_path, &small_img_name);
+        make_large_image(cover, &ipod_path, &large_img_name);
+
+        write_artwork_db(adb, &ipod_path);
+
+        track.data.artwork_size = 1134428;
+        track.data.mhii_link = 0;
+        track.data.has_artwork = 1;
+        track.data.artwork_count = 1;
+    }
+
     if let Some(album) = tag.album() {
         track.set_album(album.title.to_string());
         // TODO: Add new album into iTunesDB
@@ -361,8 +388,6 @@ async fn load_from_fs(
         track.data.unique_id,
         audio_file.get_audio_extension(),
     ));
-
-    //let cover = tag.album().unwrap().cover.unwrap();
 
     let dest = get_full_track_location(
         PathBuf::from(ipod_path.clone()),
@@ -385,6 +410,73 @@ async fn load_from_fs(
     overwrite_database(database, &ipod_path);
 
     id
+}
+
+fn write_artwork_db(adb: ADatabase, ipod_path: &str) {
+    let mut dst = PathBuf::from(ipod_path);
+    dst.push("iPod_Control");
+    dst.push("Artwork");
+    dst.push("ArtworkDB");
+    let bytes = itunesdb::artworkdb::serializer::to_bytes(adb);
+    let mut f = std::fs::File::create(dst).unwrap();
+    let _ = f.write(&bytes);
+}
+
+fn get_artwork_db(ipod_path: &str) -> ADatabase {
+    let mut dst = PathBuf::from(ipod_path);
+    dst.push("iPod_Control");
+    dst.push("Artwork");
+    dst.push("ArtworkDB");
+
+    if dst.exists() {
+        let mut f = std::fs::File::open(dst).unwrap();
+        let mut buf = Vec::new();
+        match f.read_to_end(&mut buf) {
+            Ok(n) => {
+                return itunesdb::artworkdb::deserializer::parse_bytes(&buf[..n]);
+            }
+            Err(e) => {}
+        }
+    }
+    itunesdb::artworkdb::deserializer::new_db()
+}
+
+fn make_small_image(cover: Picture, ipod_path: &str, file_name: &str) {
+    let img: IPodImage = ImageReader::new(Cursor::new(cover.data))
+        .with_guessed_format()
+        .unwrap()
+        .decode()
+        .unwrap()
+        .resize_exact(100, 100, FilterType::Lanczos3)
+        .into();
+
+    let mut dst = PathBuf::from(ipod_path);
+    dst.push("iPod_Control");
+    dst.push("Artwork");
+
+    let _ = std::fs::create_dir_all(dst.clone());
+
+    dst.push(file_name);
+    img.write(dst);
+}
+
+fn make_large_image(cover: Picture, ipod_path: &str, file_name: &str) {
+    let img: IPodImage = ImageReader::new(Cursor::new(cover.data))
+        .with_guessed_format()
+        .unwrap()
+        .decode()
+        .unwrap()
+        .resize_exact(200, 200, FilterType::Lanczos3)
+        .into();
+
+    let mut dst = PathBuf::from(ipod_path);
+    dst.push("iPod_Control");
+    dst.push("Artwork");
+
+    let _ = std::fs::create_dir_all(dst.clone());
+
+    dst.push(file_name);
+    img.write(dst);
 }
 
 async fn download_track(
