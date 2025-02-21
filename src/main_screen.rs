@@ -33,6 +33,8 @@ impl AppScreen for MainScreen {
             KeyCode::Up => self.previous_row(),
             KeyCode::Down => self.next_row(),
             KeyCode::F(5) => self.download_row(),
+            KeyCode::F(8) => self.remove_row(),
+            KeyCode::F(9) => self.remove_completely(),
             KeyCode::Tab => self.switch_mode(),
             KeyCode::F(4) => {
                 let _ = self
@@ -74,8 +76,6 @@ impl AppScreen for MainScreen {
 
         // Render Status Bar
         let status_bar = Paragraph::new(Line::from(vec![
-            "◄ ► to change tab".bold(),
-            " | ".dark_gray(),
             "<TAB> SWITCH PANEL".bold(),
             " | ".dark_gray(),
             "<F4> FS MODE".bold(),
@@ -83,6 +83,8 @@ impl AppScreen for MainScreen {
             "<F5> DOWNLOAD".bold(),
             " | ".dark_gray(),
             "<F8> DEL".bold(),
+            " | ".dark_gray(),
+            "<F9> DEL REC".bold(),
             " | ".dark_gray(),
             "<Q> QUIT".bold(),
         ]))
@@ -153,6 +155,75 @@ impl MainScreen {
             false => {
                 self.pl_table.next_row();
                 self.update_songs();
+            }
+        }
+    }
+
+    fn remove_row(&mut self) {
+        if self.selected_tab != 2 {
+            return;
+        }
+        let pl_id = self
+            .playlists
+            .as_ref()
+            .unwrap()
+            .get(self.pl_table.selected_row())
+            .unwrap()
+            .id;
+        match self.mode {
+            false => {
+                let _ = self.sender.send(AppEvent::RemovePlaylist((pl_id, false)));
+            }
+            true => {
+                let track_id = self
+                    .playlists
+                    .as_ref()
+                    .unwrap()
+                    .get(self.pl_table.selected_row())
+                    .unwrap()
+                    .tracks
+                    .get(self.song_table.selected_row())
+                    .unwrap()
+                    .data
+                    .unique_id;
+
+                let _ = self
+                    .sender
+                    .send(AppEvent::RemoveTrackFromPlaylist((track_id, pl_id)));
+            }
+        }
+    }
+
+    fn remove_completely(&mut self) {
+        if self.selected_tab != 2 {
+            return;
+        }
+        match self.mode {
+            false => {
+                let pl_id = self
+                    .playlists
+                    .as_ref()
+                    .unwrap()
+                    .get(self.pl_table.selected_row())
+                    .unwrap()
+                    .id;
+
+                let _ = self.sender.send(AppEvent::RemovePlaylist((pl_id, true)));
+            }
+            true => {
+                let track = self
+                    .playlists
+                    .as_ref()
+                    .unwrap()
+                    .get(self.pl_table.selected_row())
+                    .unwrap()
+                    .tracks
+                    .get(self.song_table.selected_row())
+                    .unwrap()
+                    .clone();
+                let _ = self
+                    .sender
+                    .send(AppEvent::RemoveTrack(track.data.unique_id));
             }
         }
     }
@@ -246,7 +317,7 @@ impl MainScreen {
                             let date = Utc.timestamp_millis_opt(playlist.timestamp as i64).unwrap();
                             vec![
                                 playlist.id.to_string(),
-                                "".to_string(),
+                                playlist.title.clone(),
                                 playlist.tracks.len().to_string(),
                                 format!("{}", date.format("%Y-%m-%d %H:%M")),
                                 "YES".to_string(),
@@ -330,7 +401,7 @@ impl MainScreen {
                             vec![
                                 track.data.unique_id.to_string(),
                                 track.get_title(),
-                                track.get_location(),
+                                track.get_artist(),
                                 track.data.bitrate.to_string(),
                                 track.get_genre(),
                             ]

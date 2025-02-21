@@ -4,7 +4,7 @@
 
 Lightweight iPod manager, batteries included.
 
-#   
+#     
 
 <div align="center">
     <img src=""/>
@@ -37,10 +37,10 @@ Lightweight iPod manager, batteries included.
 
 ### Manually
 
+## Usage
+
 ## Todos
 
-- Implement import from file system
 - Implement artwork integration
-- Implement addition to fresh ipod (without any data)
 - Implement youtube api
 - Implement albums generation

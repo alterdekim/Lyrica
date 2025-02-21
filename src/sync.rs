@@ -1,9 +1,9 @@
 use audiotags::Tag;
+use color_eyre::owo_colors::OwoColorize;
 use itunesdb::objects::{ListSortOrder, PlaylistItem};
 use itunesdb::serializer;
 use itunesdb::xobjects::{XDatabase, XPlArgument, XPlaylist, XTrackItem};
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists, CloudTrack};
-use std::error::Error;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use tokio::{
@@ -32,6 +32,11 @@ pub enum AppEvent {
     OverallProgress((u32, u32)),
     SwitchScreen(AppState),
     LoadFromFS(PathBuf),
+    LoadFromFSVec(Vec<PathBuf>),
+    LoadFromFSPL((Vec<PathBuf>, String)),
+    RemoveTrack(u32),
+    RemovePlaylist((u64, bool)),
+    RemoveTrackFromPlaylist((u32, u64)),
 }
 
 pub struct DBPlaylist {
@@ -45,23 +50,24 @@ async fn track_from_soundcloud(value: &CloudTrack) -> Option<XTrackItem> {
     let mut track_path = get_temp_dl_dir();
     track_path.push(value.id.to_string());
     track_path.set_extension("mp3");
-    let f = std::fs::File::open(&track_path).unwrap();
-    let mut data = &std::fs::read(&track_path).unwrap()[..];
-    let audio_info = audio_file_info::from_path(track_path.to_str().unwrap())
+    let audio_file = audio_file_info::from_path(track_path.to_str().unwrap())
         .await
         .unwrap();
-    let audio_info = audio_info.audio_file.tracks.get(0).unwrap();
+    let audio_info = &audio_file.audio_file.tracks.track;
 
     let mut track = XTrackItem::new(
         value.id as u32,
-        f.metadata().unwrap().len() as u32,
+        audio_info.audio_bytes as u32,
         (audio_info.duration * 1000.0) as u32,
         0,
-        audio_info.bit_rate as u32,
+        (audio_info.bit_rate / 1000) as u32,
         audio_info.sample_rate as u32,
         hash(),
         0,
     );
+
+    audio_file.modify_xtrack(&mut track);
+
     track.set_title(value.title.clone().unwrap());
     track.set_artist(
         value
@@ -70,7 +76,6 @@ async fn track_from_soundcloud(value: &CloudTrack) -> Option<XTrackItem> {
             .map_or(String::new(), |a| a.username.unwrap_or(a.permalink)),
     );
     track.set_genre(value.genre.clone().unwrap());
-    track.update_arg(6, String::from("MPEG audio file"));
     Some(track)
 }
 
@@ -79,12 +84,42 @@ fn hash() -> u64 {
     rand::random::<u64>()
 }
 
-fn overwrite_database(database: &mut XDatabase, ipod_path: &String) {
-    let data = serializer::to_bytes(database);
-    let mut p: PathBuf = Path::new(ipod_path).into();
+fn get_track_location(unique_id: u32, extension: &str) -> String {
+    let mut tp = PathBuf::new();
+    tp.push(":iPod_Control");
+    tp.push("Music");
+    tp.push(["F", &format!("{:02}", &(unique_id % 100))].concat());
+    tp.push(format!("{:X}", unique_id));
+    tp.set_extension(extension);
+    tp.to_str()
+        .unwrap()
+        .to_string()
+        .replace("/", ":")
+        .to_string()
+}
+
+fn get_full_track_location(p: PathBuf, unique_id: u32, extension: &str) -> PathBuf {
+    let mut dest = p.clone();
+    dest.push("iPod_Control");
+    dest.push("Music");
+    dest.push(["F", &format!("{:02}", &(unique_id % 100))].concat());
+    let _ = std::fs::create_dir_all(dest.to_str().unwrap());
+    dest.push(format!("{:X}", unique_id));
+    dest.set_extension(extension);
+    dest
+}
+
+fn get_itunesdb_location(path: &str) -> PathBuf {
+    let mut p: PathBuf = Path::new(path).into();
     p.push("iPod_Control");
     p.push("iTunes");
     p.push("iTunesDB");
+    p
+}
+
+fn overwrite_database(database: &mut XDatabase, ipod_path: &String) {
+    let data = serializer::to_bytes(database);
+    let p: PathBuf = get_itunesdb_location(ipod_path);
     let mut file = std::fs::File::create(p).unwrap();
     let _ = file.write(&data);
 }
@@ -121,7 +156,12 @@ pub fn initialize_async_service(
                             AppEvent::DownloadPlaylist(playlist) => { download_playlist(playlist, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await; },
                             AppEvent::DownloadTrack(track) => { download_track(track, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await; },
                             AppEvent::SwitchScreen(state) => { let _ = sender.send(AppEvent::SwitchScreen(state)).await;},
-                            AppEvent::LoadFromFS(path) => load_from_fs(path, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()),
+                            AppEvent::LoadFromFS(path) => { load_from_fs(path, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await; },
+                            AppEvent::LoadFromFSVec(files) => load_files_from_fs(files, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
+                            AppEvent::LoadFromFSPL((files, title)) => load_files_from_fs_as_playlist(files, title, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
+                            AppEvent::RemoveTrack(id) => remove_track(id, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
+                            AppEvent::RemovePlaylist((pl_id, is_hard)) => remove_playlist(pl_id, is_hard, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
+                            AppEvent::RemoveTrackFromPlaylist((track_id, pl_id)) => remove_track_from_playlist(track_id, pl_id, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
                             _ => {}
                         }
                     }
@@ -131,49 +171,220 @@ pub fn initialize_async_service(
     });
 }
 
-fn load_from_fs(
-    path: PathBuf,
+async fn remove_track_from_playlist(
+    track_id: u32,
+    pl_id: u64,
     database: &mut XDatabase,
     sender: &Sender<AppEvent>,
     ipod_path: String,
 ) {
-    let mut tag = Tag::new().read_from_path(path).unwrap();
+    let _ = sender.send(AppEvent::OverallProgress((0, 1))).await;
+
+    database.remove_track_from_playlist(track_id, pl_id);
+
+    let _ = sender.send(AppEvent::OverallProgress((1, 1))).await;
+
+    let _ = sender
+        .send(AppEvent::SwitchScreen(AppState::MainScreen))
+        .await;
+
+    let _ = sender
+        .send(AppEvent::ITunesParsed(get_playlists(database)))
+        .await;
+
+    overwrite_database(database, &ipod_path);
+}
+
+async fn remove_playlist(
+    pl_id: u64,
+    is_hard: bool,
+    database: &mut XDatabase,
+    sender: &Sender<AppEvent>,
+    ipod_path: String,
+) {
+    if is_hard {
+        let pls = database.get_playlists();
+        let pl = pls.iter().find(|p| p.data.persistent_playlist_id == pl_id);
+        if pl.is_none() {
+            return;
+        }
+        let pl = pl.unwrap();
+        let max = pl.elems.len();
+        let mut i = 1;
+        for (item, args) in pl.elems.iter() {
+            let _ = sender
+                .send(AppEvent::OverallProgress((i, max as u32)))
+                .await;
+            remove_track(item.track_id, database, sender, ipod_path.clone()).await;
+            i += 1;
+        }
+    }
+
+    let _ = sender.send(AppEvent::OverallProgress((0, 1))).await;
+
+    database.remove_playlist(pl_id);
+
+    let _ = sender.send(AppEvent::OverallProgress((1, 1))).await;
+
+    let _ = sender
+        .send(AppEvent::SwitchScreen(AppState::MainScreen))
+        .await;
+
+    let _ = sender
+        .send(AppEvent::ITunesParsed(get_playlists(database)))
+        .await;
+
+    overwrite_database(database, &ipod_path);
+}
+
+async fn remove_track(
+    id: u32,
+    database: &mut XDatabase,
+    sender: &Sender<AppEvent>,
+    ipod_path: String,
+) {
+    let _ = sender.send(AppEvent::OverallProgress((0, 1))).await;
+    database.remove_track_completely(id);
+    for ext in ["mp3", "m4a", "wav", "aif"].iter() {
+        let dest = get_full_track_location(PathBuf::from(ipod_path.clone()), id, ext);
+        let _ = std::fs::remove_file(dest);
+    }
+
+    let _ = sender.send(AppEvent::OverallProgress((1, 1))).await;
+
+    let _ = sender
+        .send(AppEvent::SwitchScreen(AppState::MainScreen))
+        .await;
+
+    let _ = sender
+        .send(AppEvent::ITunesParsed(get_playlists(database)))
+        .await;
+
+    overwrite_database(database, &ipod_path);
+}
+
+async fn load_files_from_fs_as_playlist(
+    files: Vec<PathBuf>,
+    title: String,
+    database: &mut XDatabase,
+    sender: &Sender<AppEvent>,
+    ipod_path: String,
+) {
+    let mut new_playlist = XPlaylist::new(rand::random(), ListSortOrder::SongTitle);
+
+    new_playlist.set_title(title);
+
+    for (i, file) in files.iter().enumerate() {
+        let _ = sender
+            .send(AppEvent::OverallProgress((i as u32, files.len() as u32)))
+            .await;
+        let id = load_from_fs(file.clone(), database, sender, ipod_path.clone()).await;
+
+        new_playlist.add_elem(id);
+    }
+
+    database.add_playlist(new_playlist);
+
+    let _ = sender
+        .send(AppEvent::SwitchScreen(AppState::MainScreen))
+        .await;
+
+    let _ = sender
+        .send(AppEvent::ITunesParsed(get_playlists(database)))
+        .await;
+
+    overwrite_database(database, &ipod_path);
+}
+
+async fn load_files_from_fs(
+    files: Vec<PathBuf>,
+    database: &mut XDatabase,
+    sender: &Sender<AppEvent>,
+    ipod_path: String,
+) {
+    for (i, file) in files.iter().enumerate() {
+        let _ = sender
+            .send(AppEvent::OverallProgress((i as u32, files.len() as u32)))
+            .await;
+        load_from_fs(file.clone(), database, sender, ipod_path.clone()).await;
+    }
+}
+
+async fn load_from_fs(
+    path: PathBuf,
+    database: &mut XDatabase,
+    sender: &Sender<AppEvent>,
+    ipod_path: String,
+) -> u32 {
+    let tag = Tag::new().read_from_path(&path).unwrap();
 
     let id = database.get_unique_id();
 
+    let audio_file = audio_file_info::from_path(path.to_str().unwrap())
+        .await
+        .unwrap();
+    let audio_info = &audio_file.audio_file.tracks.track;
+
     let mut track = XTrackItem::new(
         id,
-        0,
-        (tag.duration().unwrap() / 1000.0) as u32,
-        tag.year().unwrap() as u32,
-        0,
-        0,
+        audio_info.audio_bytes as u32,
+        (audio_info.duration * 1000.0) as u32,
+        tag.year().unwrap_or(0) as u32,
+        (audio_info.bit_rate / 1000) as u32,
+        audio_info.sample_rate as u32,
         hash(),
         0,
     );
-    // TODO: implement check for every property
-    track.set_title(tag.title().unwrap().to_string());
 
-    let mut tp = PathBuf::new();
-    tp.push(":iPod_Control");
-    tp.push("Music");
-    tp.push(["F", &format!("{:02}", &(track.data.unique_id % 100))].concat());
-    tp.push(format!("{:X}", track.data.unique_id));
-    tp.set_extension("mp3");
-    track.set_location(
-        tp.to_str()
-            .unwrap()
-            .to_string()
-            .replace("/", ":")
-            .to_string(),
+    audio_file.modify_xtrack(&mut track);
+
+    if let Some(title) = tag.title() {
+        track.set_title(title.to_string());
+    } else {
+        track.set_title(path.file_name().unwrap().to_str().unwrap().to_string());
+    }
+
+    if let Some(genre) = tag.genre() {
+        track.set_genre(genre.to_string());
+    }
+
+    if let Some(artist) = tag.artist() {
+        track.set_artist(artist.to_string());
+    }
+
+    if let Some(album) = tag.album() {
+        track.set_album(album.title.to_string());
+        // TODO: Add new album into iTunesDB
+    }
+
+    track.set_location(get_track_location(
+        track.data.unique_id,
+        audio_file.get_audio_extension(),
+    ));
+
+    //let cover = tag.album().unwrap().cover.unwrap();
+
+    let dest = get_full_track_location(
+        PathBuf::from(ipod_path.clone()),
+        track.data.unique_id,
+        audio_file.get_audio_extension(),
     );
-    //track.update_arg(6);
 
-    track.set_genre(tag.genre().unwrap().to_string());
-    track.set_artist(tag.artist().unwrap().to_string());
-    track.set_album(tag.album().unwrap().title.to_string());
+    let _ = std::fs::copy(path.to_str().unwrap(), dest.to_str().unwrap());
 
-    let cover = tag.album().unwrap().cover.unwrap();
+    database.add_track(track);
+
+    let _ = sender
+        .send(AppEvent::SwitchScreen(AppState::MainScreen))
+        .await;
+
+    let _ = sender
+        .send(AppEvent::ITunesParsed(get_playlists(database)))
+        .await;
+
+    overwrite_database(database, &ipod_path);
+
+    id
 }
 
 async fn download_track(
@@ -193,26 +404,8 @@ async fn download_track(
 
         if let Some(mut t) = track_from_soundcloud(&track).await {
             t.data.unique_id = database.get_unique_id();
-            let mut tp = PathBuf::new();
-            tp.push(":iPod_Control");
-            tp.push("Music");
-            tp.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
-            tp.push(format!("{:X}", t.data.unique_id));
-            tp.set_extension("mp3");
-            t.set_location(
-                tp.to_str()
-                    .unwrap()
-                    .to_string()
-                    .replace("/", ":")
-                    .to_string(),
-            );
-            let mut dest = p.clone();
-            dest.push("iPod_Control");
-            dest.push("Music");
-            dest.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
-            let _ = std::fs::create_dir_all(dest.to_str().unwrap());
-            dest.push(format!("{:X}", t.data.unique_id));
-            dest.set_extension("mp3");
+            t.set_location(get_track_location(t.data.unique_id, "mp3"));
+            let dest = get_full_track_location(p.clone(), t.data.unique_id, "mp3");
 
             let mut track_path = get_temp_dl_dir();
             track_path.push(track.id.to_string());
@@ -260,27 +453,8 @@ async fn download_playlist(
             if let Some(mut t) = track_from_soundcloud(&track).await {
                 t.data.unique_id = database.get_unique_id();
                 new_playlist.add_elem(t.data.unique_id);
-                let mut tp = PathBuf::new();
-                tp.push(":iPod_Control");
-                tp.push("Music");
-                tp.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
-                tp.push(format!("{:X}", t.data.unique_id));
-                tp.set_extension("mp3");
-                t.set_location(
-                    tp.to_str()
-                        .unwrap()
-                        .to_string()
-                        .replace("/", ":")
-                        .to_string(),
-                );
-                let mut dest = p.clone();
-                dest.push("iPod_Control");
-                dest.push("Music");
-                dest.push(["F", &format!("{:02}", &(t.data.unique_id % 100))].concat());
-                let _ = std::fs::create_dir_all(dest.to_str().unwrap());
-                dest.push(format!("{:X}", t.data.unique_id));
-                dest.set_extension("mp3");
-
+                t.set_location(get_track_location(t.data.unique_id, "mp3"));
+                let dest = get_full_track_location(p.clone(), t.data.unique_id, "mp3");
                 let mut track_path = get_temp_dl_dir();
                 track_path.push(track.id.to_string());
                 track_path.set_extension("mp3");
@@ -329,10 +503,7 @@ fn to_tracks(db: &mut XDatabase, elems: Vec<(PlaylistItem, Vec<XPlArgument>)>) -
 
 async fn parse_itunes(sender: &Sender<AppEvent>, path: String) -> XDatabase {
     let cd = get_temp_itunesdb();
-    let mut p: PathBuf = Path::new(&path).into();
-    p.push("iPod_Control");
-    p.push("iTunes");
-    p.push("iTunesDB");
+    let p = get_itunesdb_location(&path);
     let _ = std::fs::copy(p, &cd);
     let mut file = File::open(cd).await.unwrap();
     let mut contents = vec![];
@@ -389,24 +560,84 @@ async fn parse_itunes(sender: &Sender<AppEvent>, path: String) -> XDatabase {
 }
 
 mod audio_file_info {
-    use serde::{Deserialize, Serialize};
+    use itunesdb::xobjects::XTrackItem;
+    use serde::Deserialize;
     use std::process::Stdio;
     use tokio::io::{AsyncReadExt, BufReader};
     use tokio::process::Command;
 
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    #[derive(Debug, Deserialize, PartialEq)]
     pub struct AudioInfo {
         pub audio_file: AudioFileInfo,
     }
 
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    #[derive(Debug, Deserialize, PartialEq)]
     pub struct AudioFileInfo {
         pub file_name: String,
         pub file_type: String,
-        pub tracks: Vec<AudioFileTrack>,
+        pub tracks: AudioFileTracks,
     }
 
-    #[derive(Debug, Serialize, Deserialize, PartialEq)]
+    impl AudioInfo {
+        pub fn get_audio_extension(&self) -> &str {
+            match self.audio_file.file_type.as_str() {
+                "'WAVE'" => "wav",
+                "'AIFF'" => "aif",
+                "'m4af'" => "m4a",
+                _ => "mp3",
+            }
+        }
+
+        fn get_audio_codec(&self) -> String {
+            match self.audio_file.file_type.as_str() {
+                "'WAVE'" => "WAV audio file",
+                "'AIFF'" => "AIFF audio file",
+                "'m4af'" => match self.audio_file.tracks.track.format_type.as_str() {
+                    "alac" => "Apple Lossless audio file",
+                    _ => "AAC audio file",
+                },
+                _ => "MPEG audio file",
+            }
+            .to_string()
+        }
+
+        pub fn modify_xtrack(&self, track: &mut XTrackItem) {
+            track.data.type1 = 0;
+            track.data.type2 = if self.audio_file.file_type == "'MPG3'" {
+                1
+            } else {
+                0
+            };
+
+            let bytes = match self.audio_file.file_type.as_str() {
+                "'WAVE'" => "WAV",
+                "'AIFF'" => "AIF",
+                "'m4af'" => match self.audio_file.tracks.track.format_type.as_str() {
+                    "alac" => "M4A ",
+                    _ => "M4A",
+                },
+                _ => "MP3",
+            }
+            .as_bytes();
+
+            let file_type = u32::from_le_bytes(if bytes.len() == 4 {
+                [bytes[0], bytes[1], bytes[2], bytes[3]]
+            } else {
+                [bytes[0], bytes[1], bytes[2], 0u8]
+            });
+
+            track.data.filetype = file_type;
+
+            track.update_arg(6, self.get_audio_codec());
+        }
+    }
+
+    #[derive(Deserialize, Debug, PartialEq)]
+    pub struct AudioFileTracks {
+        pub track: AudioFileTrack,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq)]
     pub struct AudioFileTrack {
         pub num_channels: u32,
         pub sample_rate: u64,
@@ -418,18 +649,25 @@ mod audio_file_info {
 
     pub async fn from_path(p: &str) -> Option<AudioInfo> {
         let mut command = Command::new("afinfo");
-        command.args(vec!["-x", p]);
+        command.arg("-x");
+        command.arg(p);
         command.stdout(Stdio::piped());
         command.stderr(Stdio::null());
 
         let mut child = command.spawn().unwrap();
 
-        let mut str = String::new();
+        let mut vec = Vec::new();
         let stdout = child.stdout.take().unwrap();
         let size = BufReader::new(stdout)
-            .read_to_string(&mut str)
+            .read_to_end(&mut vec)
             .await
-            .unwrap();
-        Some(serde_xml_rs::from_str(&str).unwrap())
+            .unwrap_or(0);
+        if size == 0 {
+            return None;
+        }
+
+        /*let mut f = File::create("afinfo_out.xml").unwrap();
+        let _ = f.write(str.as_bytes());*/
+        Some(serde_xml_rs::from_str(String::from_utf8_lossy(vec.as_slice()).as_ref()).unwrap())
     }
 }
