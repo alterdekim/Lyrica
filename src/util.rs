@@ -3,6 +3,7 @@ use regex::Regex;
 use std::io::Write;
 use std::path::PathBuf;
 use std::{error::Error, process::Command, str, str::FromStr};
+use twox_hash::XxHash3_64;
 
 const VENDOR_ID: u16 = 1452;
 const PRODUCT_ID: u16 = 4617;
@@ -108,6 +109,15 @@ fn get_ipod_path() -> Option<String> {
             .last(),
         Err(_e) => None,
     }
+}
+
+// note: this hash function is used to make unique ids for each track. It doesn't aim to generate secure ones.
+pub fn hash(data: &[u8]) -> u64 {
+    XxHash3_64::oneshot(data)
+}
+
+pub fn hash_from_path(path: PathBuf) -> u64 {
+    hash(&std::fs::read(path).unwrap())
 }
 
 pub struct IPodImage {

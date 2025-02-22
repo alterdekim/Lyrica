@@ -14,6 +14,11 @@ pub fn get_temp_dl_dir() -> PathBuf {
     p
 }
 
+pub fn clear_temp_dl_dir() {
+    let path = get_temp_dl_dir();
+    let _ = std::fs::remove_dir_all(path);
+}
+
 pub fn get_config_path() -> PathBuf {
     let mut p = get_configs_dir();
     p.push("config");

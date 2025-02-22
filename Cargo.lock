@@ -1284,8 +1284,8 @@ checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 
 [[package]]
 name = "itunesdb"
-version = "0.1.89"
-source = "git+https://gitea.awain.net/alterwain/ITunesDB.git#2a867778b7bbd82956247f2f17b98fdb6865a910"
+version = "0.1.90"
+source = "git+https://gitea.awain.net/alterwain/ITunesDB.git#d37957a9a0b66577dadf3b305b02c72f1ca50a62"
 dependencies = [
  "bincode",
  "env_logger",
@@ -1441,6 +1441,7 @@ dependencies = [
  "tokio-util",
  "toml",
  "tui-big-text",
+ "twox-hash",
 ]
 
 [[package]]
@@ -2787,6 +2788,15 @@ dependencies = [
  "font8x8",
  "itertools 0.14.0",
  "ratatui",
+]
+
+[[package]]
+name = "twox-hash"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7b17f197b3050ba473acf9181f7b1d3b66d1cf7356c6cc57886662276e65908"
+dependencies = [
+ "rand",
 ]
 
 [[package]]

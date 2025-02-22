@@ -1,7 +1,7 @@
-use audiotags::{Picture, Tag};
+use audiotags::Tag;
 use color_eyre::owo_colors::OwoColorize;
 use image::imageops::FilterType;
-use image::ImageReader;
+use image::{GenericImageView, ImageReader};
 use itunesdb::artworkdb::aobjects::ADatabase;
 use itunesdb::objects::{ListSortOrder, PlaylistItem};
 use itunesdb::serializer;
@@ -51,14 +51,19 @@ pub struct DBPlaylist {
     pub tracks: Vec<XTrackItem>,
 }
 
-async fn track_from_soundcloud(value: &CloudTrack) -> Option<XTrackItem> {
+async fn track_from_soundcloud(value: &CloudTrack, ipod_path: String) -> Option<XTrackItem> {
     let mut track_path = get_temp_dl_dir();
     track_path.push(value.id.to_string());
     track_path.set_extension("mp3");
+    let mut image_path = get_temp_dl_dir();
+    image_path.push(value.id.to_string());
+    image_path.set_extension("jpg");
     let audio_file = audio_file_info::from_path(track_path.to_str().unwrap())
         .await
         .unwrap();
     let audio_info = &audio_file.audio_file.tracks.track;
+
+    let song_dbid = util::hash_from_path(track_path);
 
     let mut track = XTrackItem::new(
         value.id as u32,
@@ -67,9 +72,33 @@ async fn track_from_soundcloud(value: &CloudTrack) -> Option<XTrackItem> {
         0,
         (audio_info.bit_rate / 1000) as u32,
         audio_info.sample_rate as u32,
-        hash(),
+        song_dbid,
         0,
     );
+
+    if image_path.exists() {
+        let mut adb = get_artwork_db(&ipod_path);
+
+        let image_data = std::fs::read(image_path).unwrap();
+
+        let (small_img_name, large_img_name) = adb.add_images(song_dbid, util::hash(&image_data));
+
+        let mut dst = PathBuf::from(&ipod_path);
+        dst.push("iPod_Control");
+        dst.push("Artwork");
+
+        let size = image_data.len();
+
+        make_cover_image(&image_data, &ipod_path, &small_img_name, (100, 100));
+        make_cover_image(&image_data, &ipod_path, &large_img_name, (200, 200));
+
+        write_artwork_db(adb, &ipod_path);
+
+        track.data.artwork_size = size as u32;
+        track.data.mhii_link = 0;
+        track.data.has_artwork = 1;
+        track.data.artwork_count = 1;
+    }
 
     audio_file.modify_xtrack(&mut track);
 
@@ -82,11 +111,6 @@ async fn track_from_soundcloud(value: &CloudTrack) -> Option<XTrackItem> {
     );
     track.set_genre(value.genre.clone().unwrap());
     Some(track)
-}
-
-// note: this hash function is used to make unique ids for each track. It doesn't aim to generate secure ones.
-fn hash() -> u64 {
-    rand::random::<u64>()
 }
 
 fn get_track_location(unique_id: u32, extension: &str) -> String {
@@ -330,7 +354,7 @@ async fn load_from_fs(
         .unwrap();
     let audio_info = &audio_file.audio_file.tracks.track;
 
-    let song_dbid = hash();
+    let song_dbid = util::hash_from_path(path.clone());
 
     let mut track = XTrackItem::new(
         id,
@@ -362,18 +386,20 @@ async fn load_from_fs(
     if let Some(cover) = tag.album_cover() {
         let mut adb = get_artwork_db(&ipod_path);
 
-        let (small_img_name, large_img_name) = adb.add_images(song_dbid, id);
+        let (small_img_name, large_img_name) = adb.add_images(song_dbid, util::hash(cover.data));
 
         let mut dst = PathBuf::from(&ipod_path);
         dst.push("iPod_Control");
         dst.push("Artwork");
 
-        make_small_image(cover.clone(), &ipod_path, &small_img_name);
-        make_large_image(cover, &ipod_path, &large_img_name);
+        let size = cover.data.len();
+
+        make_cover_image(cover.data, &ipod_path, &small_img_name, (100, 100));
+        make_cover_image(cover.data, &ipod_path, &large_img_name, (200, 200));
 
         write_artwork_db(adb, &ipod_path);
 
-        track.data.artwork_size = 1134428;
+        track.data.artwork_size = size as u32;
         track.data.mhii_link = 0;
         track.data.has_artwork = 1;
         track.data.artwork_count = 1;
@@ -441,32 +467,34 @@ fn get_artwork_db(ipod_path: &str) -> ADatabase {
     itunesdb::artworkdb::deserializer::new_db()
 }
 
-fn make_small_image(cover: Picture, ipod_path: &str, file_name: &str) {
-    let img: IPodImage = ImageReader::new(Cursor::new(cover.data))
+fn make_cover_image(cover: &[u8], ipod_path: &str, file_name: &str, dim: (u32, u32)) {
+    let mut dynamic_im = ImageReader::new(Cursor::new(cover))
         .with_guessed_format()
         .unwrap()
         .decode()
-        .unwrap()
-        .resize_exact(100, 100, FilterType::Lanczos3)
-        .into();
+        .unwrap();
 
-    let mut dst = PathBuf::from(ipod_path);
-    dst.push("iPod_Control");
-    dst.push("Artwork");
+    if dynamic_im.height() != dynamic_im.width() {
+        let side = if dynamic_im.height() < dynamic_im.width() {
+            dynamic_im.height()
+        } else {
+            dynamic_im.width()
+        };
+        let x = if dynamic_im.height() < dynamic_im.width() {
+            (dynamic_im.width() - side) / 2
+        } else {
+            0
+        };
+        let y = if dynamic_im.height() < dynamic_im.width() {
+            0
+        } else {
+            (dynamic_im.height() - side) / 2
+        };
+        dynamic_im = dynamic_im.crop(x, y, side, side);
+    }
 
-    let _ = std::fs::create_dir_all(dst.clone());
-
-    dst.push(file_name);
-    img.write(dst);
-}
-
-fn make_large_image(cover: Picture, ipod_path: &str, file_name: &str) {
-    let img: IPodImage = ImageReader::new(Cursor::new(cover.data))
-        .with_guessed_format()
-        .unwrap()
-        .decode()
-        .unwrap()
-        .resize_exact(200, 200, FilterType::Lanczos3)
+    let img: IPodImage = dynamic_im
+        .resize_exact(dim.0, dim.1, FilterType::Lanczos3)
         .into();
 
     let mut dst = PathBuf::from(ipod_path);
@@ -494,7 +522,7 @@ async fn download_track(
     {
         let p: PathBuf = Path::new(&ipod_path).into();
 
-        if let Some(mut t) = track_from_soundcloud(&track).await {
+        if let Some(mut t) = track_from_soundcloud(&track, ipod_path.clone()).await {
             t.data.unique_id = database.get_unique_id();
             t.set_location(get_track_location(t.data.unique_id, "mp3"));
             let dest = get_full_track_location(p.clone(), t.data.unique_id, "mp3");
@@ -518,6 +546,8 @@ async fn download_track(
         .await;
 
     overwrite_database(database, &ipod_path);
+
+    crate::config::clear_temp_dl_dir();
 }
 
 async fn download_playlist(
@@ -542,7 +572,7 @@ async fn download_playlist(
             if track.title.is_none() {
                 continue;
             }
-            if let Some(mut t) = track_from_soundcloud(&track).await {
+            if let Some(mut t) = track_from_soundcloud(&track, ipod_path.clone()).await {
                 t.data.unique_id = database.get_unique_id();
                 new_playlist.add_elem(t.data.unique_id);
                 t.set_location(get_track_location(t.data.unique_id, "mp3"));
@@ -569,6 +599,8 @@ async fn download_playlist(
         .await;
 
     overwrite_database(database, &ipod_path);
+
+    crate::config::clear_temp_dl_dir();
 }
 
 fn get_playlists(db: &mut XDatabase) -> Vec<DBPlaylist> {
