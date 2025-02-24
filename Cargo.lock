@@ -1284,8 +1284,8 @@ checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 
 [[package]]
 name = "itunesdb"
-version = "0.1.90"
-source = "git+https://gitea.awain.net/alterwain/ITunesDB.git#d37957a9a0b66577dadf3b305b02c72f1ca50a62"
+version = "0.1.95"
+source = "git+https://gitea.awain.net/alterwain/ITunesDB.git#2ecbe7666bf7c561c9ace767d2e4055e0d92127d"
 dependencies = [
  "bincode",
  "env_logger",
@@ -2349,8 +2349,8 @@ dependencies = [
 
 [[package]]
 name = "soundcloud"
-version = "0.1.8"
-source = "git+https://gitea.awain.net/alterwain/soundcloud_api.git#656aef28f356411ff25cee14214ea0e677563537"
+version = "0.1.9"
+source = "git+https://gitea.awain.net/alterwain/soundcloud_api.git#a6732847bebbcb6e59a1b8a44a965fe7092af6e9"
 dependencies = [
  "hyper-util",
  "regex",

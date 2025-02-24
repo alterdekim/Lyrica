@@ -21,11 +21,28 @@ pub struct FileSystem {
     sender: UnboundedSender<AppEvent>,
 }
 
-fn check_extension_compatibility(ext: &OsStr) -> bool {
+fn check_extension_compatibility(ext: &str) -> bool {
     matches!(
-        ext.to_str().unwrap().to_lowercase().as_str(),
+        ext.to_lowercase().as_str(),
         "mp3" | "m4a" | "wav" | "aiff" | "aif"
     )
+}
+
+fn get_extension_from_filename(file_name: Option<&OsStr>) -> String {
+    if let Some(fname) = file_name {
+        let file_name = fname.to_str().unwrap();
+        let index = file_name
+            .chars()
+            .enumerate()
+            .filter(|(i, c)| *c == '.')
+            .map(|(i, c)| i)
+            .last();
+        if let Some(index) = index {
+            let extension: String = file_name.chars().skip(index).collect();
+            return extension;
+        }
+    }
+    "none".to_string()
 }
 
 fn list_files_recursively(p: PathBuf) -> Vec<PathBuf> {
@@ -38,7 +55,14 @@ fn list_files_recursively(p: PathBuf) -> Vec<PathBuf> {
             continue;
         }
         let a = path.unwrap().path();
-        if a.is_file() && check_extension_compatibility(a.extension().unwrap()) {
+        if a.is_file()
+            && check_extension_compatibility(
+                a.extension()
+                    .map_or(&get_extension_from_filename(a.file_name()), |s| {
+                        s.to_str().unwrap()
+                    }),
+            )
+        {
             files.push(a.clone());
         }
         if a.is_dir() {
@@ -130,10 +154,9 @@ impl FileSystem {
         let mut dir = paths
             .filter_map(|res| res.ok())
             .filter(|p| {
-                p.path()
-                    .extension()
-                    .map_or(false, check_extension_compatibility)
-                    || p.path().is_dir()
+                p.path().extension().map_or(false, |s| {
+                    check_extension_compatibility(s.to_str().unwrap_or("none"))
+                }) || p.path().is_dir()
             })
             .collect::<Vec<DirEntry>>();
         dir.sort_by(|a, b| {

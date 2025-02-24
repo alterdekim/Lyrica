@@ -4,10 +4,10 @@
 
 Lightweight iPod manager, batteries included.
 
-#     
+#       
 
 <div align="center">
-    <img src=""/>
+    <img src="https://w0n.zip/file/eZm8gd"/>
     <p>
         <small>Screenshot from MacOS Big Sur terminal</small>
     </p>
@@ -41,6 +41,5 @@ Lightweight iPod manager, batteries included.
 
 ## Todos
 
-- Implement artwork integration
+- Implement manual playlist editing
 - Implement youtube api
-- Implement albums generation

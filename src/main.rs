@@ -121,13 +121,21 @@ impl App {
                         let screen: &mut MainScreen = self.get_screen(&AppState::MainScreen);
                         screen.set_soundcloud_playlists(playlists);
                     },
-                    AppEvent::OverallProgress((c, max)) => {
+                    AppEvent::OverallProgress((c, max, color)) => {
+                        self.state = AppState::LoadingScreen;
                         let screen: &mut LoadingScreen = self.get_screen(&AppState::LoadingScreen);
-                        screen.progress = Some((c, max));
+                        screen.progress = Some((c, max, color));
+                        screen.artwork_progress = None;
                     },
                     AppEvent::CurrentProgress(progress) => {
                         let screen: &mut LoadingScreen = self.get_screen(&AppState::LoadingScreen);
+                        screen.artwork_progress = None;
                         screen.s_progress = Some(progress);
+                    },
+                    AppEvent::ArtworkProgress((c, max)) => {
+                        let screen: &mut LoadingScreen = self.get_screen(&AppState::LoadingScreen);
+                        screen.artwork_progress = Some((c, max));
+                        screen.s_progress = None;
                     },
                     AppEvent::SwitchScreen(screen) => {
                         self.state = screen;

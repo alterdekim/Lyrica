@@ -10,7 +10,8 @@ use crate::{dlp::DownloadProgress, screen::AppScreen, theme::Theme};
 
 #[derive(Default)]
 pub struct LoadingScreen {
-    pub progress: Option<(u32, u32)>,
+    pub progress: Option<(u32, u32, ratatui::style::Color)>,
+    pub artwork_progress: Option<(u32, u32)>,
     pub s_progress: Option<DownloadProgress>,
 }
 
@@ -61,9 +62,27 @@ impl LoadingScreen {
             self.render_overall(frame, chunks[1]);
         }
 
-        if self.s_progress.is_some() {
+        if self.artwork_progress.is_some() {
+            self.render_artwork_progress(frame, chunks[2]);
+        } else if self.s_progress.is_some() {
             self.render_current(frame, chunks[2]);
         }
+    }
+
+    fn render_artwork_progress(&self, frame: &mut Frame, area: Rect) {
+        let gauge = Gauge::default()
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Generating album covers "),
+            )
+            .gauge_style(Style::default().fg(Color::LightBlue))
+            .ratio(
+                self.artwork_progress.unwrap().0 as f64 / self.artwork_progress.unwrap().1 as f64,
+            )
+            .label("Generating album covers...");
+
+        frame.render_widget(gauge, area);
     }
 
     fn render_current(&self, frame: &mut Frame, area: Rect) {
@@ -96,7 +115,7 @@ impl LoadingScreen {
                     .borders(Borders::ALL)
                     .title(" Downloading Playlist "),
             )
-            .gauge_style(Style::default().fg(Color::Green))
+            .gauge_style(Style::default().fg(self.progress.unwrap().2))
             .ratio(self.progress.unwrap().0 as f64 / self.progress.unwrap().1 as f64)
             .label(format!(
                 "{:}/{:}",

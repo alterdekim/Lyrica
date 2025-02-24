@@ -6,6 +6,7 @@ use itunesdb::artworkdb::aobjects::ADatabase;
 use itunesdb::objects::{ListSortOrder, PlaylistItem};
 use itunesdb::serializer;
 use itunesdb::xobjects::{XDatabase, XPlArgument, XPlaylist, XTrackItem};
+use ratatui::style::Color;
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists, CloudTrack};
 use std::io::Read;
 use std::io::{Cursor, Write};
@@ -34,7 +35,8 @@ pub enum AppEvent {
     DownloadPlaylist(CloudPlaylist),
     DownloadTrack(CloudTrack),
     CurrentProgress(DownloadProgress),
-    OverallProgress((u32, u32)),
+    OverallProgress((u32, u32, ratatui::style::Color)),
+    ArtworkProgress((u32, u32)),
     SwitchScreen(AppState),
     LoadFromFS(PathBuf),
     LoadFromFSVec(Vec<PathBuf>),
@@ -51,7 +53,11 @@ pub struct DBPlaylist {
     pub tracks: Vec<XTrackItem>,
 }
 
-async fn track_from_soundcloud(value: &CloudTrack, ipod_path: String) -> Option<XTrackItem> {
+async fn track_from_soundcloud(
+    value: &CloudTrack,
+    ipod_path: String,
+    sender: &Sender<AppEvent>,
+) -> Option<XTrackItem> {
     let mut track_path = get_temp_dl_dir();
     track_path.push(value.id.to_string());
     track_path.set_extension("mp3");
@@ -62,7 +68,6 @@ async fn track_from_soundcloud(value: &CloudTrack, ipod_path: String) -> Option<
         .await
         .unwrap();
     let audio_info = &audio_file.audio_file.tracks.track;
-
     let song_dbid = util::hash_from_path(track_path);
 
     let mut track = XTrackItem::new(
@@ -77,20 +82,24 @@ async fn track_from_soundcloud(value: &CloudTrack, ipod_path: String) -> Option<
     );
 
     if image_path.exists() {
+        let _ = sender.send(AppEvent::ArtworkProgress((0, 2))).await;
         let mut adb = get_artwork_db(&ipod_path);
 
         let image_data = std::fs::read(image_path).unwrap();
 
-        let (small_img_name, large_img_name) = adb.add_images(song_dbid, util::hash(&image_data));
+        let cover_hash = util::hash(&image_data);
 
-        let mut dst = PathBuf::from(&ipod_path);
-        dst.push("iPod_Control");
-        dst.push("Artwork");
+        let if_cover_present = adb.if_cover_present(cover_hash);
+
+        let (small_img_name, large_img_name) = adb.add_images(song_dbid, cover_hash);
 
         let size = image_data.len();
 
-        make_cover_image(&image_data, &ipod_path, &small_img_name, (100, 100));
-        make_cover_image(&image_data, &ipod_path, &large_img_name, (200, 200));
+        if !if_cover_present {
+            make_cover_image(&image_data, &ipod_path, &small_img_name, (100, 100));
+            let _ = sender.send(AppEvent::ArtworkProgress((1, 2))).await;
+            make_cover_image(&image_data, &ipod_path, &large_img_name, (200, 200));
+        }
 
         write_artwork_db(adb, &ipod_path);
 
@@ -98,6 +107,7 @@ async fn track_from_soundcloud(value: &CloudTrack, ipod_path: String) -> Option<
         track.data.mhii_link = 0;
         track.data.has_artwork = 1;
         track.data.artwork_count = 1;
+        let _ = sender.send(AppEvent::ArtworkProgress((2, 2))).await;
     }
 
     audio_file.modify_xtrack(&mut track);
@@ -109,7 +119,9 @@ async fn track_from_soundcloud(value: &CloudTrack, ipod_path: String) -> Option<
             .clone()
             .map_or(String::new(), |a| a.username.unwrap_or(a.permalink)),
     );
-    track.set_genre(value.genre.clone().unwrap());
+    if value.genre.is_some() {
+        track.set_genre(value.genre.clone().unwrap());
+    }
     Some(track)
 }
 
@@ -207,11 +219,15 @@ async fn remove_track_from_playlist(
     sender: &Sender<AppEvent>,
     ipod_path: String,
 ) {
-    let _ = sender.send(AppEvent::OverallProgress((0, 1))).await;
+    let _ = sender
+        .send(AppEvent::OverallProgress((0, 1, Color::Red)))
+        .await;
 
     database.remove_track_from_playlist(track_id, pl_id);
 
-    let _ = sender.send(AppEvent::OverallProgress((1, 1))).await;
+    let _ = sender
+        .send(AppEvent::OverallProgress((1, 1, Color::Red)))
+        .await;
 
     let _ = sender
         .send(AppEvent::SwitchScreen(AppState::MainScreen))
@@ -242,18 +258,22 @@ async fn remove_playlist(
         let mut i = 1;
         for (item, args) in pl.elems.iter() {
             let _ = sender
-                .send(AppEvent::OverallProgress((i, max as u32)))
+                .send(AppEvent::OverallProgress((i, max as u32, Color::Red)))
                 .await;
             remove_track(item.track_id, database, sender, ipod_path.clone()).await;
             i += 1;
         }
     }
 
-    let _ = sender.send(AppEvent::OverallProgress((0, 1))).await;
+    let _ = sender
+        .send(AppEvent::OverallProgress((0, 1, Color::Red)))
+        .await;
 
     database.remove_playlist(pl_id);
 
-    let _ = sender.send(AppEvent::OverallProgress((1, 1))).await;
+    let _ = sender
+        .send(AppEvent::OverallProgress((1, 1, Color::Red)))
+        .await;
 
     let _ = sender
         .send(AppEvent::SwitchScreen(AppState::MainScreen))
@@ -272,14 +292,18 @@ async fn remove_track(
     sender: &Sender<AppEvent>,
     ipod_path: String,
 ) {
-    let _ = sender.send(AppEvent::OverallProgress((0, 1))).await;
+    let _ = sender
+        .send(AppEvent::OverallProgress((0, 1, Color::Red)))
+        .await;
     database.remove_track_completely(id);
     for ext in ["mp3", "m4a", "wav", "aif"].iter() {
         let dest = get_full_track_location(PathBuf::from(ipod_path.clone()), id, ext);
         let _ = std::fs::remove_file(dest);
     }
 
-    let _ = sender.send(AppEvent::OverallProgress((1, 1))).await;
+    let _ = sender
+        .send(AppEvent::OverallProgress((1, 1, Color::Red)))
+        .await;
 
     let _ = sender
         .send(AppEvent::SwitchScreen(AppState::MainScreen))
@@ -305,7 +329,11 @@ async fn load_files_from_fs_as_playlist(
 
     for (i, file) in files.iter().enumerate() {
         let _ = sender
-            .send(AppEvent::OverallProgress((i as u32, files.len() as u32)))
+            .send(AppEvent::OverallProgress((
+                i as u32,
+                files.len() as u32,
+                Color::Green,
+            )))
             .await;
         let id = load_from_fs(file.clone(), database, sender, ipod_path.clone()).await;
 
@@ -333,7 +361,11 @@ async fn load_files_from_fs(
 ) {
     for (i, file) in files.iter().enumerate() {
         let _ = sender
-            .send(AppEvent::OverallProgress((i as u32, files.len() as u32)))
+            .send(AppEvent::OverallProgress((
+                i as u32,
+                files.len() as u32,
+                Color::Green,
+            )))
             .await;
         load_from_fs(file.clone(), database, sender, ipod_path.clone()).await;
     }
@@ -347,7 +379,7 @@ async fn load_from_fs(
 ) -> u32 {
     let tag = Tag::new().read_from_path(&path).unwrap();
 
-    let id = database.get_unique_id();
+    let mut id = database.get_unique_id();
 
     let audio_file = audio_file_info::from_path(path.to_str().unwrap())
         .await
@@ -356,74 +388,85 @@ async fn load_from_fs(
 
     let song_dbid = util::hash_from_path(path.clone());
 
-    let mut track = XTrackItem::new(
-        id,
-        audio_info.audio_bytes as u32,
-        (audio_info.duration * 1000.0) as u32,
-        tag.year().unwrap_or(0) as u32,
-        (audio_info.bit_rate / 1000) as u32,
-        audio_info.sample_rate as u32,
-        song_dbid,
-        0,
-    );
+    if !database.if_track_in_library(song_dbid) {
+        let mut track = XTrackItem::new(
+            id,
+            audio_info.audio_bytes as u32,
+            (audio_info.duration * 1000.0) as u32,
+            tag.year().unwrap_or(0) as u32,
+            (audio_info.bit_rate / 1000) as u32,
+            audio_info.sample_rate as u32,
+            song_dbid,
+            0,
+        );
 
-    audio_file.modify_xtrack(&mut track);
+        audio_file.modify_xtrack(&mut track);
 
-    if let Some(title) = tag.title() {
-        track.set_title(title.to_string());
-    } else {
-        track.set_title(path.file_name().unwrap().to_str().unwrap().to_string());
+        if let Some(title) = tag.title() {
+            track.set_title(title.to_string());
+        } else {
+            track.set_title(path.file_name().unwrap().to_str().unwrap().to_string());
+        }
+
+        if let Some(genre) = tag.genre() {
+            track.set_genre(genre.to_string());
+        }
+
+        if let Some(artist) = tag.artist() {
+            track.set_artist(artist.to_string());
+        }
+
+        if let Some(cover) = tag.album_cover() {
+            let _ = sender.send(AppEvent::ArtworkProgress((0, 2))).await;
+
+            let mut adb = get_artwork_db(&ipod_path);
+
+            let cover_hash = util::hash(cover.data);
+
+            let if_cover_present = adb.if_cover_present(cover_hash);
+
+            let (small_img_name, large_img_name) = adb.add_images(song_dbid, cover_hash);
+
+            let size = cover.data.len();
+
+            if !if_cover_present {
+                make_cover_image(cover.data, &ipod_path, &small_img_name, (100, 100));
+                let _ = sender.send(AppEvent::ArtworkProgress((1, 2))).await;
+                make_cover_image(cover.data, &ipod_path, &large_img_name, (200, 200));
+            }
+
+            write_artwork_db(adb, &ipod_path);
+
+            track.data.artwork_size = size as u32;
+            track.data.mhii_link = 0;
+            track.data.has_artwork = 1;
+            track.data.artwork_count = 1;
+
+            let _ = sender.send(AppEvent::ArtworkProgress((2, 2))).await;
+        }
+
+        if let Some(album) = tag.album() {
+            track.set_album(album.title.to_string());
+            // TODO: Add new album into iTunesDB
+        }
+
+        track.set_location(get_track_location(
+            track.data.unique_id,
+            audio_file.get_audio_extension(),
+        ));
+
+        let dest = get_full_track_location(
+            PathBuf::from(ipod_path.clone()),
+            track.data.unique_id,
+            audio_file.get_audio_extension(),
+        );
+
+        let _ = std::fs::copy(path.to_str().unwrap(), dest.to_str().unwrap());
+
+        database.add_track(track);
+    } else if let Some(unique_id) = database.get_unique_id_by_dbid(song_dbid) {
+        id = unique_id;
     }
-
-    if let Some(genre) = tag.genre() {
-        track.set_genre(genre.to_string());
-    }
-
-    if let Some(artist) = tag.artist() {
-        track.set_artist(artist.to_string());
-    }
-
-    if let Some(cover) = tag.album_cover() {
-        let mut adb = get_artwork_db(&ipod_path);
-
-        let (small_img_name, large_img_name) = adb.add_images(song_dbid, util::hash(cover.data));
-
-        let mut dst = PathBuf::from(&ipod_path);
-        dst.push("iPod_Control");
-        dst.push("Artwork");
-
-        let size = cover.data.len();
-
-        make_cover_image(cover.data, &ipod_path, &small_img_name, (100, 100));
-        make_cover_image(cover.data, &ipod_path, &large_img_name, (200, 200));
-
-        write_artwork_db(adb, &ipod_path);
-
-        track.data.artwork_size = size as u32;
-        track.data.mhii_link = 0;
-        track.data.has_artwork = 1;
-        track.data.artwork_count = 1;
-    }
-
-    if let Some(album) = tag.album() {
-        track.set_album(album.title.to_string());
-        // TODO: Add new album into iTunesDB
-    }
-
-    track.set_location(get_track_location(
-        track.data.unique_id,
-        audio_file.get_audio_extension(),
-    ));
-
-    let dest = get_full_track_location(
-        PathBuf::from(ipod_path.clone()),
-        track.data.unique_id,
-        audio_file.get_audio_extension(),
-    );
-
-    let _ = std::fs::copy(path.to_str().unwrap(), dest.to_str().unwrap());
-
-    database.add_track(track);
 
     let _ = sender
         .send(AppEvent::SwitchScreen(AppState::MainScreen))
@@ -522,18 +565,20 @@ async fn download_track(
     {
         let p: PathBuf = Path::new(&ipod_path).into();
 
-        if let Some(mut t) = track_from_soundcloud(&track, ipod_path.clone()).await {
-            t.data.unique_id = database.get_unique_id();
-            t.set_location(get_track_location(t.data.unique_id, "mp3"));
-            let dest = get_full_track_location(p.clone(), t.data.unique_id, "mp3");
+        if let Some(mut t) = track_from_soundcloud(&track, ipod_path.clone(), sender).await {
+            if !database.if_track_in_library(t.data.dbid) {
+                t.data.unique_id = database.get_unique_id();
+                t.set_location(get_track_location(t.data.unique_id, "mp3"));
+                let dest = get_full_track_location(p.clone(), t.data.unique_id, "mp3");
 
-            let mut track_path = get_temp_dl_dir();
-            track_path.push(track.id.to_string());
-            track_path.set_extension("mp3");
+                let mut track_path = get_temp_dl_dir();
+                track_path.push(track.id.to_string());
+                track_path.set_extension("mp3");
 
-            let _ = std::fs::copy(track_path.to_str().unwrap(), dest.to_str().unwrap());
+                let _ = std::fs::copy(track_path.to_str().unwrap(), dest.to_str().unwrap());
 
-            database.add_track(t);
+                database.add_track(t);
+            }
         }
     }
 
@@ -572,18 +617,21 @@ async fn download_playlist(
             if track.title.is_none() {
                 continue;
             }
-            if let Some(mut t) = track_from_soundcloud(&track, ipod_path.clone()).await {
-                t.data.unique_id = database.get_unique_id();
-                new_playlist.add_elem(t.data.unique_id);
-                t.set_location(get_track_location(t.data.unique_id, "mp3"));
-                let dest = get_full_track_location(p.clone(), t.data.unique_id, "mp3");
-                let mut track_path = get_temp_dl_dir();
-                track_path.push(track.id.to_string());
-                track_path.set_extension("mp3");
+            if let Some(mut t) = track_from_soundcloud(&track, ipod_path.clone(), sender).await {
+                if !database.if_track_in_library(t.data.dbid) {
+                    t.data.unique_id = database.get_unique_id();
+                    new_playlist.add_elem(t.data.unique_id);
+                    t.set_location(get_track_location(t.data.unique_id, "mp3"));
+                    let dest = get_full_track_location(p.clone(), t.data.unique_id, "mp3");
+                    let mut track_path = get_temp_dl_dir();
+                    track_path.push(track.id.to_string());
+                    track_path.set_extension("mp3");
 
-                let _ = std::fs::copy(track_path.to_str().unwrap(), dest.to_str().unwrap());
-
-                database.add_track(t);
+                    let _ = std::fs::copy(track_path.to_str().unwrap(), dest.to_str().unwrap());
+                    database.add_track(t);
+                } else if let Some(unique_id) = database.get_unique_id_by_dbid(t.data.dbid) {
+                    new_playlist.add_elem(unique_id);
+                }
             }
         }
 
@@ -663,14 +711,17 @@ async fn parse_itunes(sender: &Sender<AppEvent>, path: String) -> XDatabase {
     let mut playlists = playlists.collection;
 
     for playlist in playlists.iter_mut() {
-        if let Ok(tracks) = soundcloud::get_tracks(
-            playlist.tracks.clone(),
-            client_id.clone(),
-            app_version.clone(),
-        )
-        .await
-        {
-            playlist.tracks = tracks;
+        let trr = playlist.tracks.clone();
+        playlist.tracks = Vec::new();
+        for pl_tracks in trr.clone().chunks(45) {
+            if let Ok(tracks) =
+                soundcloud::get_tracks(pl_tracks.to_vec(), client_id.clone(), app_version.clone())
+                    .await
+            {
+                let mut tracks = tracks;
+                tracks.retain(|t| t.title.is_some());
+                playlist.tracks.append(&mut tracks);
+            }
         }
     }
 

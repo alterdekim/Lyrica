@@ -1,7 +1,7 @@
-use std::{io, path::PathBuf, process::Stdio};
-
+use ratatui::style::Color;
 use regex::Regex;
 use serde::Deserialize;
+use std::{io, path::PathBuf, process::Stdio};
 use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::Command,
@@ -59,11 +59,15 @@ pub async fn download_track_from_soundcloud(
     while let Ok(Some(line)) = reader.next_line().await {
         if line.starts_with("{") {
             let progress: DownloadProgress = serde_json::from_str(&line).unwrap();
-            let _ = sender.send(AppEvent::OverallProgress((0, 1))).await;
+            let _ = sender
+                .send(AppEvent::OverallProgress((0, 1, Color::Green)))
+                .await;
             let _ = sender.send(AppEvent::CurrentProgress(progress)).await;
         }
     }
-    let _ = sender.send(AppEvent::OverallProgress((1, 1))).await;
+    let _ = sender
+        .send(AppEvent::OverallProgress((1, 1, Color::Green)))
+        .await;
     Ok(())
 }
 
@@ -114,7 +118,9 @@ pub async fn download_from_soundcloud(
                 let s: Vec<&str> = s.split(' ').collect();
                 let cur = s.first().unwrap().trim().parse().unwrap();
                 let max = s.last().unwrap().trim().parse().unwrap();
-                let _ = sender.send(AppEvent::OverallProgress((cur, max))).await;
+                let _ = sender
+                    .send(AppEvent::OverallProgress((cur, max, Color::Green)))
+                    .await;
             }
             None => {
                 if line.starts_with("{") {

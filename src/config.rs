@@ -32,12 +32,6 @@ pub fn get_temp_itunesdb() -> PathBuf {
     p
 }
 
-pub fn get_db() -> PathBuf {
-    let mut p = get_configs_dir();
-    p.push("data.redb");
-    p
-}
-
 #[derive(Debug, Deserialize, Serialize)]
 pub struct YouTubeConfiguration {
     pub user_id: u64,
