@@ -21,6 +21,7 @@ futures = "0.3"
 tokio = { version = "1", features = ["full"] }
 tokio-util = { version = "0.7.12", features = ["codec"] }
 soundcloud = { version = "0.1.9", git = "https://gitea.awain.net/alterwain/soundcloud_api.git" }
+youtube-api = { version = "0.1.1", git = "https://gitea.awain.net/alterwain/youtube_api.git" }
 itunesdb = { version = "0.1.99", git = "https://gitea.awain.net/alterwain/ITunesDB.git" }
 rand = "0.8.5"
 tui-big-text = "0.7.1"

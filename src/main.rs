@@ -121,6 +121,10 @@ impl App {
                         let screen: &mut MainScreen = self.get_screen(&AppState::MainScreen);
                         screen.set_soundcloud_playlists(playlists);
                     },
+                    AppEvent::YoutubeGot(playlists) => {
+                        let screen: &mut MainScreen = self.get_screen(&AppState::MainScreen);
+                        screen.set_youtube_playlists(playlists);
+                    },
                     AppEvent::OverallProgress((c, max, color)) => {
                         self.state = AppState::LoadingScreen;
                         let screen: &mut LoadingScreen = self.get_screen(&AppState::LoadingScreen);

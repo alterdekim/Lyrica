@@ -1,3 +1,11 @@
+use crate::util::IPodImage;
+use crate::{
+    config::{
+        get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration,
+    },
+    dlp::{self, DownloadProgress},
+    util, AppState,
+};
 use audiotags::Tag;
 use color_eyre::owo_colors::OwoColorize;
 use image::imageops::FilterType;
@@ -6,6 +14,7 @@ use itunesdb::artworkdb::aobjects::ADatabase;
 use itunesdb::objects::{ListSortOrder, PlaylistItem};
 use itunesdb::serializer;
 use itunesdb::xobjects::{XDatabase, XPlArgument, XPlaylist, XTrackItem};
+use rand::random;
 use ratatui::style::Color;
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists, CloudTrack};
 use std::io::Read;
@@ -18,23 +27,18 @@ use tokio::{
     sync::mpsc::{Sender, UnboundedReceiver},
 };
 use tokio_util::sync::CancellationToken;
-
-use crate::util::IPodImage;
-use crate::{
-    config::{
-        get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration,
-    },
-    dlp::{self, DownloadProgress},
-    util, AppState,
-};
+use youtube_api::objects::YoutubeVideo;
 
 pub enum AppEvent {
     SearchIPod,
     IPodNotFound,
     ITunesParsed(Vec<DBPlaylist>),
+    YoutubeGot(Vec<YTPlaylist>),
     SoundcloudGot(CloudPlaylists),
     DownloadPlaylist(CloudPlaylist),
     DownloadTrack(CloudTrack),
+    DownloadYTPlaylist(YTPlaylist),
+    DownloadYTTrack(YoutubeVideo),
     CurrentProgress(DownloadProgress),
     OverallProgress((u32, u32, ratatui::style::Color)),
     ArtworkProgress((u32, u32)),
@@ -52,6 +56,84 @@ pub struct DBPlaylist {
     pub title: String,
     pub timestamp: u32,
     pub tracks: Vec<XTrackItem>,
+}
+
+#[derive(Clone)]
+pub struct YTPlaylist {
+    pub title: String,
+    pub url: String,
+    pub videos: Vec<YoutubeVideo>,
+}
+
+async fn track_from_video(
+    value: &YoutubeVideo,
+    ipod_path: String,
+    sender: &Sender<AppEvent>,
+) -> Option<XTrackItem> {
+    let mut track_path = get_temp_dl_dir();
+    track_path.push(&value.videoId);
+    track_path.set_extension("mp3");
+    let mut image_path = get_temp_dl_dir();
+    image_path.push(&value.videoId);
+    image_path.set_extension("webp");
+
+    let audio_file = audio_file_info::from_path(track_path.to_str().unwrap())
+        .await
+        .unwrap();
+    let audio_info = &audio_file.audio_file.tracks.track;
+    let song_dbid = util::hash_from_path(track_path.clone());
+
+    let mut track = XTrackItem::new(
+        random(),
+        File::open(track_path)
+            .await
+            .unwrap()
+            .metadata()
+            .await
+            .unwrap()
+            .size() as u32,
+        (audio_info.duration * 1000.0) as u32,
+        0,
+        (audio_info.bit_rate / 1000) as u32,
+        audio_info.sample_rate as u32,
+        song_dbid,
+        0,
+    );
+
+    if image_path.exists() {
+        let _ = sender.send(AppEvent::ArtworkProgress((0, 2))).await;
+        let mut adb = get_artwork_db(&ipod_path);
+
+        let image_data = std::fs::read(image_path).unwrap();
+
+        let cover_hash = util::hash(&image_data);
+
+        let if_cover_present = adb.if_cover_present(cover_hash);
+
+        let (small_img_name, large_img_name) = adb.add_images(song_dbid, cover_hash);
+
+        let size = image_data.len();
+
+        if !if_cover_present {
+            make_cover_image(&image_data, &ipod_path, &small_img_name, (100, 100));
+            let _ = sender.send(AppEvent::ArtworkProgress((1, 2))).await;
+            make_cover_image(&image_data, &ipod_path, &large_img_name, (200, 200));
+        }
+
+        write_artwork_db(adb, &ipod_path);
+
+        track.data.artwork_size = size as u32;
+        track.data.mhii_link = 0;
+        track.data.has_artwork = 1;
+        track.data.artwork_count = 1;
+        let _ = sender.send(AppEvent::ArtworkProgress((2, 2))).await;
+    }
+
+    audio_file.modify_xtrack(&mut track);
+
+    track.set_title(value.title.clone());
+    track.set_artist(value.publisher.clone());
+    Some(track)
 }
 
 async fn track_from_soundcloud(
@@ -203,6 +285,8 @@ pub fn initialize_async_service(
                             },
                             AppEvent::DownloadPlaylist(playlist) => { download_playlist(playlist, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await; },
                             AppEvent::DownloadTrack(track) => { download_track(track, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await; },
+                            AppEvent::DownloadYTTrack(video) => { download_video(video, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await; },
+                            AppEvent::DownloadYTPlaylist(ytplaylist) => { download_youtube_playlist(ytplaylist, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await; },
                             AppEvent::SwitchScreen(state) => { let _ = sender.send(AppEvent::SwitchScreen(state)).await;},
                             AppEvent::LoadFromFS(path) => {
                                 load_from_fs(path, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await;
@@ -584,6 +668,48 @@ fn make_cover_image(cover: &[u8], ipod_path: &str, file_name: &str, dim: (u32, u
     img.write(dst);
 }
 
+async fn download_video(
+    video: YoutubeVideo,
+    database: &mut XDatabase,
+    sender: &Sender<AppEvent>,
+    ipod_path: String,
+) {
+    if let Ok(()) =
+        dlp::download_track_from_youtube(&video.videoId.clone(), &get_temp_dl_dir(), sender.clone())
+            .await
+    {
+        let p: PathBuf = Path::new(&ipod_path).into();
+
+        if let Some(mut t) = track_from_video(&video, ipod_path.clone(), sender).await {
+            if !database.if_track_in_library(t.data.dbid) {
+                t.data.unique_id = database.get_unique_id();
+                t.set_location(get_track_location(t.data.unique_id, "mp3"));
+                let dest = get_full_track_location(p.clone(), t.data.unique_id, "mp3");
+
+                let mut track_path = get_temp_dl_dir();
+                track_path.push(&video.videoId);
+                track_path.set_extension("mp3");
+
+                let _ = std::fs::copy(track_path.to_str().unwrap(), dest.to_str().unwrap());
+
+                database.add_track(t);
+            }
+        }
+    }
+
+    let _ = sender
+        .send(AppEvent::SwitchScreen(AppState::MainScreen))
+        .await;
+
+    let _ = sender
+        .send(AppEvent::ITunesParsed(get_playlists(database)))
+        .await;
+
+    overwrite_database(database, &ipod_path);
+
+    crate::config::clear_temp_dl_dir();
+}
+
 async fn download_track(
     track: CloudTrack,
     database: &mut XDatabase,
@@ -614,6 +740,60 @@ async fn download_track(
                 database.add_track(t);
             }
         }
+    }
+
+    let _ = sender
+        .send(AppEvent::SwitchScreen(AppState::MainScreen))
+        .await;
+
+    let _ = sender
+        .send(AppEvent::ITunesParsed(get_playlists(database)))
+        .await;
+
+    overwrite_database(database, &ipod_path);
+
+    crate::config::clear_temp_dl_dir();
+}
+
+async fn download_youtube_playlist(
+    playlist: YTPlaylist,
+    database: &mut XDatabase,
+    sender: &Sender<AppEvent>,
+    ipod_path: String,
+) {
+    if let Ok(()) =
+        dlp::download_from_youtube(&playlist.url, &get_temp_dl_dir(), sender.clone()).await
+    {
+        let videos = playlist.videos;
+
+        let p: PathBuf = Path::new(&ipod_path).into();
+
+        let mut new_playlist = XPlaylist::new(rand::random(), ListSortOrder::SongTitle);
+
+        new_playlist.set_title(playlist.title);
+
+        for video in videos {
+            if let Some(mut t) = track_from_video(&video, ipod_path.clone(), sender).await {
+                if !database.if_track_in_library(t.data.dbid) {
+                    t.data.unique_id = database.get_unique_id();
+                    new_playlist.add_elem(t.data.unique_id);
+                    t.set_location(get_track_location(t.data.unique_id, "mp3"));
+                    let dest = get_full_track_location(p.clone(), t.data.unique_id, "mp3");
+
+                    let mut track_path = get_temp_dl_dir();
+                    track_path.push(&video.videoId);
+                    track_path.set_extension("mp3");
+
+                    let _ = std::fs::copy(track_path.to_str().unwrap(), dest.to_str().unwrap());
+
+                    database.add_track(t);
+                } else if let Some(unique_id) = database.get_unique_id_by_dbid(t.data.dbid) {
+                    new_playlist.add_elem(unique_id);
+                }
+            }
+        }
+
+        database.add_playlist(new_playlist);
     }
 
     let _ = sender
@@ -731,6 +911,28 @@ async fn parse_itunes(sender: &Sender<AppEvent>, path: String) -> XDatabase {
     let mut content = String::new();
     file.read_to_string(&mut content).await.unwrap();
     let config: LyricaConfiguration = toml::from_str(&content).unwrap();
+
+    let yt_channel_id = config.get_youtube().user_id.clone();
+
+    let rid = youtube_api::get_channel(yt_channel_id.clone())
+        .await
+        .unwrap();
+    let pls = youtube_api::get_playlists(yt_channel_id, rid)
+        .await
+        .unwrap();
+
+    let mut yt_v = Vec::new();
+
+    for pl in pls {
+        let videos = youtube_api::get_playlist(pl.browse_id).await.unwrap();
+        yt_v.push(YTPlaylist {
+            title: pl.title,
+            url: pl.pl_url,
+            videos,
+        });
+    }
+
+    let _ = sender.send(AppEvent::YoutubeGot(yt_v)).await;
 
     let app_version = soundcloud::get_app().await.unwrap().unwrap();
     let client_id = soundcloud::get_client_id().await.unwrap().unwrap();

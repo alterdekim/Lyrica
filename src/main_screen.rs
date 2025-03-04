@@ -11,7 +11,7 @@ use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::component::table::SmartTable;
-use crate::sync::DBPlaylist;
+use crate::sync::{DBPlaylist, YTPlaylist};
 use crate::{screen::AppScreen, sync::AppEvent, theme::Theme, AppState};
 
 pub struct MainScreen {
@@ -20,6 +20,7 @@ pub struct MainScreen {
     pl_table: SmartTable,
     song_table: SmartTable,
     tab_titles: Vec<String>,
+    youtube: Option<Vec<YTPlaylist>>,
     soundcloud: Option<Vec<CloudPlaylist>>,
     playlists: Option<Vec<DBPlaylist>>,
     sender: UnboundedSender<AppEvent>,
@@ -104,6 +105,7 @@ impl MainScreen {
             pl_table: SmartTable::default(),
             song_table: SmartTable::default(),
             soundcloud: None,
+            youtube: None,
             playlists: None,
             selected_tab: 0,
             tab_titles: vec![
@@ -229,33 +231,73 @@ impl MainScreen {
     }
 
     fn download_row(&mut self) {
-        if self.selected_tab == 1 {
-            // SC
-            match self.mode {
-                false => {
-                    let playlist = self
-                        .soundcloud
-                        .as_ref()
-                        .unwrap()
-                        .get(self.pl_table.selected_row())
-                        .unwrap()
-                        .clone();
-                    let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist));
-                }
-                true => {
-                    let track = self
-                        .soundcloud
-                        .as_ref()
-                        .unwrap()
-                        .get(self.pl_table.selected_row())
-                        .unwrap()
-                        .tracks
-                        .get(self.song_table.selected_row())
-                        .unwrap()
-                        .clone();
-                    let _ = self.sender.send(AppEvent::DownloadTrack(track));
+        match self.selected_tab {
+            0 => {
+                // YT
+                match self.mode {
+                    false => {
+                        let playlist = self
+                            .youtube
+                            .as_ref()
+                            .unwrap()
+                            .get(self.pl_table.selected_row())
+                            .unwrap()
+                            .clone();
+
+                        let _ = self.sender.send(AppEvent::DownloadYTPlaylist(playlist));
+                    }
+                    true => {
+                        let track = self
+                            .youtube
+                            .as_ref()
+                            .unwrap()
+                            .get(self.pl_table.selected_row())
+                            .unwrap()
+                            .videos
+                            .get(self.song_table.selected_row())
+                            .unwrap()
+                            .clone();
+
+                        let _ = self.sender.send(AppEvent::DownloadYTTrack(track));
+                    }
                 }
             }
+            1 => {
+                // SC
+                match self.mode {
+                    false => {
+                        let playlist = self
+                            .soundcloud
+                            .as_ref()
+                            .unwrap()
+                            .get(self.pl_table.selected_row())
+                            .unwrap()
+                            .clone();
+                        let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist));
+                    }
+                    true => {
+                        let track = self
+                            .soundcloud
+                            .as_ref()
+                            .unwrap()
+                            .get(self.pl_table.selected_row())
+                            .unwrap()
+                            .tracks
+                            .get(self.song_table.selected_row())
+                            .unwrap()
+                            .clone();
+                        let _ = self.sender.send(AppEvent::DownloadTrack(track));
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    pub fn set_youtube_playlists(&mut self, pls: Vec<YTPlaylist>) {
+        self.youtube = Some(pls);
+        if self.selected_tab == 0 {
+            self.update_tables();
         }
     }
 
@@ -292,6 +334,23 @@ impl MainScreen {
         );
 
         let data = match self.selected_tab {
+            0 => {
+                if let Some(yt) = &self.youtube {
+                    yt.iter()
+                        .map(|playlist| {
+                            vec![
+                                0.to_string(),
+                                playlist.title.clone(),
+                                [playlist.videos.len().to_string(), " songs".to_string()].concat(),
+                                String::new(),
+                                "NO".to_string(),
+                            ]
+                        })
+                        .collect::<Vec<Vec<String>>>()
+                } else {
+                    Vec::new()
+                }
+            }
             1 => {
                 if let Some(sc) = &self.soundcloud {
                     sc.iter()
@@ -349,6 +408,35 @@ impl MainScreen {
         .to_vec();
 
         match self.selected_tab {
+            0 => {
+                self.song_table = SmartTable::new(
+                    ["Id", "Title", "Artist", "Duration", ""]
+                        .iter_mut()
+                        .map(|s| s.to_string())
+                        .collect(),
+                    constraints,
+                );
+                self.set_mode(self.mode);
+
+                if let Some(pls) = &self.youtube {
+                    let y = &pls.get(self.pl_table.selected_row()).unwrap().videos;
+                    let data = y
+                        .iter()
+                        .map(|video| {
+                            vec![
+                                video.videoId.clone(),
+                                video.title.clone(),
+                                video.publisher.clone(),
+                                video.lengthSeconds.to_string(),
+                                String::new(),
+                            ]
+                        })
+                        .collect::<Vec<Vec<String>>>();
+
+                    self.song_table.set_data(data);
+                }
+                self.song_table.set_title(" Songs ".to_string());
+            }
             1 => {
                 self.song_table = SmartTable::new(
                     ["Id", "Title", "Artist", "Duration", "Genre"]
