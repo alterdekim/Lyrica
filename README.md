@@ -4,7 +4,7 @@
 
 Lightweight iPod manager, batteries included.
 
-#          
+#             
 
 <div align="center">
     <img src="https://w0n.zip/file/dRgjRe"/>
@@ -26,17 +26,25 @@ Lightweight iPod manager, batteries included.
 - Mac OS
 - [YT-DLP](https://github.com/yt-dlp/yt-dlp) A feature-rich command-line audio/video downloader.
 
-## Installation
+## Install / Update
 
-### Auto install
+To install or update Lyrica simply run this command in your Mac terminal:
 
 ```bash
-
+curl -sSf https://w0n.zip/file/dRzpOd | sh
 ```
 
-### Manually
+### Uninstall
+
+To uninstall Lyrica (but why?) you need to run this command in your terminal:
+
+```bash
+rm /usr/local/bin/lyrica
+```
 
 ## Usage
+
+Just type lyrica in your terminal from anywhere
 
 ## Todos
 
