@@ -4,10 +4,10 @@
 
 Lightweight iPod manager, batteries included.
 
-#       
+#          
 
 <div align="center">
-    <img src="https://w0n.zip/file/eZm8gd"/>
+    <img src="https://w0n.zip/file/dRgjRe"/>
     <p>
         <small>Screenshot from MacOS Big Sur terminal</small>
     </p>
@@ -16,10 +16,9 @@ Lightweight iPod manager, batteries included.
 ## Features
 
 - **Basic operations**: Load songs from filesystem to ipod. Manually delete anything if needed.
-- **Streamings**: Download playlists from Soundcloud, Youtube, Spotify to your iPod.
-- **No mindf_ck**: Albums are generated automatically from tracks metadata. No human processing required
+- **Streamings**: Download playlists from Soundcloud, Youtube to your iPod.
+- **No iTunes**: Finally you can get rid of iTunes or Apple Music. Marvelous!
 - **Playlists**: Create/remove/edit playlists on your ipod
-- **Smart playlists**: Smart playlists manager included.
 
 ## Requirements
 
@@ -42,4 +41,3 @@ Lightweight iPod manager, batteries included.
 ## Todos
 
 - Implement manual playlist editing
-- Implement youtube api
