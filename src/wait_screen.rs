@@ -1,5 +1,4 @@
 use crate::screen::AppScreen;
-use color_eyre::owo_colors::OwoColorize;
 use ratatui::layout::{Constraint, Direction, Flex, Layout};
 use ratatui::widgets::Paragraph;
 use ratatui::{

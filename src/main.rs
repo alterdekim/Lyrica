@@ -8,12 +8,11 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
 use loading_screen::LoadingScreen;
 use main_screen::MainScreen;
 use ratatui::{
     prelude::{Backend, CrosstermBackend},
-    widgets::Widget,
     Frame, Terminal,
 };
 use screen::AppScreen;

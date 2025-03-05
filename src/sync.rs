@@ -7,9 +7,8 @@ use crate::{
     util, AppState,
 };
 use audiotags::Tag;
-use color_eyre::owo_colors::OwoColorize;
 use image::imageops::FilterType;
-use image::{GenericImageView, ImageReader};
+use image::ImageReader;
 use itunesdb::artworkdb::aobjects::ADatabase;
 use itunesdb::objects::{ListSortOrder, PlaylistItem};
 use itunesdb::serializer;

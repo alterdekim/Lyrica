@@ -1,4 +1,4 @@
-use image::{DynamicImage, GenericImageView};
+use image::DynamicImage;
 use regex::Regex;
 use std::io::Write;
 use std::path::PathBuf;
