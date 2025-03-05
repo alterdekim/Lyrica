@@ -940,36 +940,36 @@ async fn parse_itunes(sender: &Sender<AppEvent>, path: String) -> XDatabase {
     tokio::spawn(async move {
         let app_version = soundcloud::get_app().await.unwrap().unwrap();
         let client_id = soundcloud::get_client_id().await.unwrap().unwrap();
-        let playlists =
+        if let Ok(playlists) =
             soundcloud::get_playlists(soundcloud_user_id, client_id.clone(), app_version.clone())
                 .await
-                .unwrap();
+        {
+            let mut playlists = playlists.collection;
 
-        let mut playlists = playlists.collection;
-
-        for playlist in playlists.iter_mut() {
-            let trr = playlist.tracks.clone();
-            playlist.tracks = Vec::new();
-            for pl_tracks in trr.clone().chunks(45) {
-                if let Ok(tracks) = soundcloud::get_tracks(
-                    pl_tracks.to_vec(),
-                    client_id.clone(),
-                    app_version.clone(),
-                )
-                .await
-                {
-                    let mut tracks = tracks;
-                    tracks.retain(|t| t.title.is_some());
-                    playlist.tracks.append(&mut tracks);
+            for playlist in playlists.iter_mut() {
+                let trr = playlist.tracks.clone();
+                playlist.tracks = Vec::new();
+                for pl_tracks in trr.clone().chunks(45) {
+                    if let Ok(tracks) = soundcloud::get_tracks(
+                        pl_tracks.to_vec(),
+                        client_id.clone(),
+                        app_version.clone(),
+                    )
+                    .await
+                    {
+                        let mut tracks = tracks;
+                        tracks.retain(|t| t.title.is_some());
+                        playlist.tracks.append(&mut tracks);
+                    }
                 }
             }
-        }
 
-        let _ = soundcloud_sender
-            .send(AppEvent::SoundcloudGot(CloudPlaylists {
-                collection: playlists,
-            }))
-            .await;
+            let _ = soundcloud_sender
+                .send(AppEvent::SoundcloudGot(CloudPlaylists {
+                    collection: playlists,
+                }))
+                .await;
+        }
     });
 
     database

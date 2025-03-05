@@ -2356,8 +2356,8 @@ dependencies = [
 
 [[package]]
 name = "soundcloud"
-version = "0.1.9"
-source = "git+https://gitea.awain.net/alterwain/soundcloud_api.git#a6732847bebbcb6e59a1b8a44a965fe7092af6e9"
+version = "0.1.11"
+source = "git+https://gitea.awain.net/alterwain/soundcloud_api.git#06a9c773fc01e37867298a4985899be843aeb3ae"
 dependencies = [
  "hyper-util",
  "regex",

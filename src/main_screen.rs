@@ -419,21 +419,23 @@ impl MainScreen {
                 self.set_mode(self.mode);
 
                 if let Some(pls) = &self.youtube {
-                    let y = &pls.get(self.pl_table.selected_row()).unwrap().videos;
-                    let data = y
-                        .iter()
-                        .map(|video| {
-                            vec![
-                                video.videoId.clone(),
-                                video.title.clone(),
-                                video.publisher.clone(),
-                                video.lengthSeconds.to_string(),
-                                String::new(),
-                            ]
-                        })
-                        .collect::<Vec<Vec<String>>>();
+                    if let Some(ypl) = &pls.get(self.pl_table.selected_row()) {
+                        let y = ypl.videos.clone();
+                        let data = y
+                            .iter()
+                            .map(|video| {
+                                vec![
+                                    video.videoId.clone(),
+                                    video.title.clone(),
+                                    video.publisher.clone(),
+                                    video.lengthSeconds.to_string(),
+                                    String::new(),
+                                ]
+                            })
+                            .collect::<Vec<Vec<String>>>();
 
-                    self.song_table.set_data(data);
+                        self.song_table.set_data(data);
+                    }
                 }
                 self.song_table.set_title(" Songs ".to_string());
             }
