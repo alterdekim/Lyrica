@@ -352,7 +352,7 @@ async fn remove_playlist(
         let pl = pl.unwrap();
         let max = pl.elems.len();
         let mut i = 1;
-        for (item, args) in pl.elems.iter() {
+        for (item, _args) in pl.elems.iter() {
             let _ = sender
                 .send(AppEvent::OverallProgress((i, max as u32, Color::Red)))
                 .await;
@@ -622,7 +622,7 @@ fn get_artwork_db(ipod_path: &str) -> ADatabase {
             Ok(n) => {
                 return itunesdb::artworkdb::deserializer::parse_bytes(&buf[..n]);
             }
-            Err(e) => {}
+            Err(_e) => {}
         }
     }
     itunesdb::artworkdb::deserializer::new_db()
@@ -912,60 +912,66 @@ async fn parse_itunes(sender: &Sender<AppEvent>, path: String) -> XDatabase {
     file.read_to_string(&mut content).await.unwrap();
     let config: LyricaConfiguration = toml::from_str(&content).unwrap();
 
+    let yt_sender = sender.clone();
     let yt_channel_id = config.get_youtube().user_id.clone();
+    tokio::spawn(async move {
+        let rid = youtube_api::get_channel(yt_channel_id.clone())
+            .await
+            .unwrap();
+        let pls = youtube_api::get_playlists(yt_channel_id, rid)
+            .await
+            .unwrap();
 
-    let rid = youtube_api::get_channel(yt_channel_id.clone())
-        .await
-        .unwrap();
-    let pls = youtube_api::get_playlists(yt_channel_id, rid)
-        .await
-        .unwrap();
+        let mut yt_v = Vec::new();
 
-    let mut yt_v = Vec::new();
+        for pl in pls {
+            let videos = youtube_api::get_playlist(pl.browse_id).await.unwrap();
+            yt_v.push(YTPlaylist {
+                title: pl.title,
+                url: pl.pl_url,
+                videos,
+            });
+        }
 
-    for pl in pls {
-        let videos = youtube_api::get_playlist(pl.browse_id).await.unwrap();
-        yt_v.push(YTPlaylist {
-            title: pl.title,
-            url: pl.pl_url,
-            videos,
-        });
-    }
+        let _ = yt_sender.send(AppEvent::YoutubeGot(yt_v)).await;
+    });
 
-    let _ = sender.send(AppEvent::YoutubeGot(yt_v)).await;
+    let soundcloud_user_id = config.get_soundcloud().user_id;
+    let soundcloud_sender = sender.clone();
+    tokio::spawn(async move {
+        let app_version = soundcloud::get_app().await.unwrap().unwrap();
+        let client_id = soundcloud::get_client_id().await.unwrap().unwrap();
+        let playlists =
+            soundcloud::get_playlists(soundcloud_user_id, client_id.clone(), app_version.clone())
+                .await
+                .unwrap();
 
-    let app_version = soundcloud::get_app().await.unwrap().unwrap();
-    let client_id = soundcloud::get_client_id().await.unwrap().unwrap();
-    let playlists = soundcloud::get_playlists(
-        config.get_soundcloud().user_id,
-        client_id.clone(),
-        app_version.clone(),
-    )
-    .await
-    .unwrap();
+        let mut playlists = playlists.collection;
 
-    let mut playlists = playlists.collection;
-
-    for playlist in playlists.iter_mut() {
-        let trr = playlist.tracks.clone();
-        playlist.tracks = Vec::new();
-        for pl_tracks in trr.clone().chunks(45) {
-            if let Ok(tracks) =
-                soundcloud::get_tracks(pl_tracks.to_vec(), client_id.clone(), app_version.clone())
-                    .await
-            {
-                let mut tracks = tracks;
-                tracks.retain(|t| t.title.is_some());
-                playlist.tracks.append(&mut tracks);
+        for playlist in playlists.iter_mut() {
+            let trr = playlist.tracks.clone();
+            playlist.tracks = Vec::new();
+            for pl_tracks in trr.clone().chunks(45) {
+                if let Ok(tracks) = soundcloud::get_tracks(
+                    pl_tracks.to_vec(),
+                    client_id.clone(),
+                    app_version.clone(),
+                )
+                .await
+                {
+                    let mut tracks = tracks;
+                    tracks.retain(|t| t.title.is_some());
+                    playlist.tracks.append(&mut tracks);
+                }
             }
         }
-    }
 
-    let _ = sender
-        .send(AppEvent::SoundcloudGot(CloudPlaylists {
-            collection: playlists,
-        }))
-        .await;
+        let _ = soundcloud_sender
+            .send(AppEvent::SoundcloudGot(CloudPlaylists {
+                collection: playlists,
+            }))
+            .await;
+    });
 
     database
 }

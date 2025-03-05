@@ -12,7 +12,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::component::table::SmartTable;
 use crate::sync::{DBPlaylist, YTPlaylist};
-use crate::{screen::AppScreen, sync::AppEvent, theme::Theme, AppState};
+use crate::{screen::AppScreen, sync::AppEvent, AppState};
 
 pub struct MainScreen {
     mode: bool,
@@ -46,7 +46,7 @@ impl AppScreen for MainScreen {
         }
     }
 
-    fn render(&self, frame: &mut Frame, _theme: &Theme) {
+    fn render(&self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([

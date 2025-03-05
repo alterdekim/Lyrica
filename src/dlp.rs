@@ -14,7 +14,6 @@ use crate::sync::AppEvent;
 pub struct DownloadProgress {
     pub progress_percentage: String,
     pub progress_total: String,
-    pub speed: String,
     pub eta: String,
 }
 

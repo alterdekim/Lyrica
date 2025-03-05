@@ -1,4 +1,4 @@
-use crate::{screen::AppScreen, theme::Theme};
+use crate::screen::AppScreen;
 use color_eyre::owo_colors::OwoColorize;
 use ratatui::layout::{Constraint, Direction, Flex, Layout};
 use ratatui::widgets::Paragraph;
@@ -14,9 +14,9 @@ use tui_big_text::{BigText, PixelSize};
 pub struct WaitScreen {}
 
 impl AppScreen for WaitScreen {
-    fn handle_key_event(&mut self, key_event: crossterm::event::KeyEvent) {}
+    fn handle_key_event(&mut self, _key_event: crossterm::event::KeyEvent) {}
 
-    fn render(&self, frame: &mut Frame, theme: &Theme) {
+    fn render(&self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([Constraint::Percentage(33); 3])

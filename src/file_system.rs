@@ -1,6 +1,6 @@
 use crate::component::table::SmartTable;
 use crate::sync::AppEvent;
-use crate::{screen::AppScreen, theme::Theme, AppState};
+use crate::{screen::AppScreen, AppState};
 use chrono::{DateTime, Utc};
 use crossterm::event::KeyCode;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -34,8 +34,8 @@ fn get_extension_from_filename(file_name: Option<&OsStr>) -> String {
         let index = file_name
             .chars()
             .enumerate()
-            .filter(|(i, c)| *c == '.')
-            .map(|(i, c)| i)
+            .filter(|(_i, c)| *c == '.')
+            .map(|(i, _c)| i)
             .last();
         if let Some(index) = index {
             let extension: String = file_name.chars().skip(index).collect();
@@ -91,7 +91,7 @@ impl AppScreen for FileSystem {
         }
     }
 
-    fn render(&self, frame: &mut Frame, _theme: &Theme) {
+    fn render(&self, frame: &mut Frame) {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
