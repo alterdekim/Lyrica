@@ -85,7 +85,6 @@ impl AppScreen for FileSystem {
             }
             KeyCode::F(5) => self.download_as_is(),
             KeyCode::F(6) => self.download_as_playlist(),
-            KeyCode::Tab => self.move_up(),
             KeyCode::Enter => self.enter_directory(),
             _ => {}
         }
@@ -104,8 +103,6 @@ impl AppScreen for FileSystem {
 
         // Render Status Bar
         let status_bar = Paragraph::new(Line::from(vec![
-            "<TAB> MOVE UP".bold(),
-            " | ".dark_gray(),
             "<F4> SWITCH TO NORMAL".bold(),
             " | ".dark_gray(),
             "<F5> SAVE AS IS".bold(),
@@ -195,6 +192,8 @@ impl FileSystem {
             })
             .collect::<Vec<Vec<String>>>();
 
+        let data = [vec![vec![String::from("..")]], data].concat();
+
         self.files = dir;
 
         self.table.set_data(data);
@@ -203,29 +202,33 @@ impl FileSystem {
     }
 
     fn download_as_is(&self) {
-        let entry = self.files.get(self.table.selected_row()).unwrap();
-        if entry.path().is_dir() {
-            let files = list_files_recursively(entry.path());
-            let _ = self.sender.send(AppEvent::LoadFromFSVec(files));
-        } else {
-            let _ = self.sender.send(AppEvent::LoadFromFS(entry.path()));
+        if let 1.. = self.table.selected_row() {
+            let entry = self.files.get(self.table.selected_row() - 1).unwrap();
+            if entry.path().is_dir() {
+                let files = list_files_recursively(entry.path());
+                let _ = self.sender.send(AppEvent::LoadFromFSVec(files));
+            } else {
+                let _ = self.sender.send(AppEvent::LoadFromFS(entry.path()));
+            }
         }
     }
 
     fn download_as_playlist(&self) {
-        let entry = self.files.get(self.table.selected_row()).unwrap();
-        if entry.path().is_dir() {
-            let files = list_files_recursively(entry.path());
-            let _ = self.sender.send(AppEvent::LoadFromFSPL((
-                files,
-                entry
-                    .path()
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .to_string(),
-            )));
+        if let 1.. = self.table.selected_row() {
+            let entry = self.files.get(self.table.selected_row() - 1).unwrap();
+            if entry.path().is_dir() {
+                let files = list_files_recursively(entry.path());
+                let _ = self.sender.send(AppEvent::LoadFromFSPL((
+                    files,
+                    entry
+                        .path()
+                        .file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_string(),
+                )));
+            }
         }
     }
 
@@ -239,11 +242,16 @@ impl FileSystem {
     }
 
     fn enter_directory(&mut self) {
-        let entry = self.files.get(self.table.selected_row()).unwrap();
-        if !entry.path().is_dir() {
-            return;
+        match self.table.selected_row() {
+            0 => self.move_up(),
+            _ => {
+                let entry = self.files.get(self.table.selected_row() - 1).unwrap();
+                if !entry.path().is_dir() {
+                    return;
+                }
+                self.get_path(entry.path());
+            }
         }
-        self.get_path(entry.path());
     }
 
     fn render_main(&self, frame: &mut Frame, area: Rect) {

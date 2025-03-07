@@ -288,6 +288,9 @@ pub fn initialize_async_service(
                             AppEvent::DownloadYTPlaylist(ytplaylist) => { download_youtube_playlist(ytplaylist, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await; },
                             AppEvent::SwitchScreen(state) => { let _ = sender.send(AppEvent::SwitchScreen(state)).await;},
                             AppEvent::LoadFromFS(path) => {
+                                let _ = sender
+                                        .send(AppEvent::SwitchScreen(AppState::LoadingScreen))
+                                        .await;
                                 load_from_fs(path, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await;
                                     let _ = sender
                                         .send(AppEvent::SwitchScreen(AppState::FileSystem))
@@ -454,6 +457,9 @@ async fn load_files_from_fs(
     sender: &Sender<AppEvent>,
     ipod_path: String,
 ) {
+    let _ = sender
+        .send(AppEvent::SwitchScreen(AppState::LoadingScreen))
+        .await;
     for (i, file) in files.iter().enumerate() {
         let _ = sender
             .send(AppEvent::OverallProgress((
