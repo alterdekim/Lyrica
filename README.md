@@ -4,7 +4,7 @@
 
 Lightweight iPod manager, batteries included.
 
-#             
+#               
 
 <div align="center">
     <img src="https://w0n.zip/file/dRgjRe"/>
@@ -31,7 +31,7 @@ Lightweight iPod manager, batteries included.
 To install or update Lyrica simply run this command in your Mac terminal:
 
 ```bash
-curl -sSf https://w0n.zip/file/dRzpOd | sh
+curl -sSf https://w0n.zip/raw/egM23b | sh
 ```
 
 ### Uninstall
@@ -45,7 +45,3 @@ rm /usr/local/bin/lyrica
 ## Usage
 
 Just type lyrica in your terminal from anywhere
-
-## Todos
-
-- Implement manual playlist editing
