@@ -1284,8 +1284,8 @@ checksum = "d75a2a4b1b190afb6f5425f10f6a8f959d2ea0b9c2b1d79553551850539e4674"
 
 [[package]]
 name = "itunesdb"
-version = "0.1.99"
-source = "git+https://gitea.awain.net/alterwain/ITunesDB.git#80106beeb00d9e882bf08857304c44a5c93e52a6"
+version = "0.1.103"
+source = "git+https://gitea.awain.net/alterwain/ITunesDB.git#5b028c4a0f6f3783b33a5ae7575a2bb382623675"
 dependencies = [
  "bincode",
  "env_logger",
@@ -1439,7 +1439,6 @@ dependencies = [
  "regex",
  "rusb",
  "serde",
- "serde-xml-rs",
  "serde_json",
  "soundcloud",
  "throbber-widgets-tui",
@@ -2211,18 +2210,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "02fc4265df13d6fa1d00ecff087228cc0a2b5f3c0e87e258d8b94a156e984c70"
 dependencies = [
  "serde_derive",
-]
-
-[[package]]
-name = "serde-xml-rs"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fb3aa78ecda1ebc9ec9847d5d3aba7d618823446a049ba2491940506da6e2782"
-dependencies = [
- "log",
- "serde",
- "thiserror 1.0.69",
- "xml-rs",
 ]
 
 [[package]]
@@ -3191,12 +3178,6 @@ name = "writeable"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e9df38ee2d2c3c5948ea468a8406ff0db0b29ae1ffde1bcf20ef305bcc95c51"
-
-[[package]]
-name = "xml-rs"
-version = "0.8.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5b940ebc25896e71dd073bad2dbaa2abfe97b0a391415e22ad1326d9c54e3c4"
 
 [[package]]
 name = "yoke"

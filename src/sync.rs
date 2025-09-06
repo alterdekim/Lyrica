@@ -1,3 +1,5 @@
+use crate::config::get_backup_itunesdb;
+use crate::search_util::SearchEntry;
 use crate::util::IPodImage;
 use crate::{
     config::{
@@ -12,7 +14,7 @@ use image::ImageReader;
 use itunesdb::artworkdb::aobjects::ADatabase;
 use itunesdb::objects::{ListSortOrder, PlaylistItem};
 use itunesdb::serializer;
-use itunesdb::xobjects::{XDatabase, XPlArgument, XPlaylist, XTrackItem};
+use itunesdb::xobjects::{XDatabase, XPlArgument, XPlaylist, XSomeList, XTrackItem};
 use rand::random;
 use ratatui::style::Color;
 use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists, CloudTrack};
@@ -48,6 +50,8 @@ pub enum AppEvent {
     RemoveTrack(u32),
     RemovePlaylist((u64, bool)),
     RemoveTrackFromPlaylist((u32, u64)),
+    SearchFor(String),
+    SearchShow(Vec<SearchEntry>),
 }
 
 pub struct DBPlaylist {
@@ -79,25 +83,29 @@ async fn track_from_video(
     let audio_file = audio_file_info::from_path(track_path.to_str().unwrap())
         .await
         .unwrap();
-    let audio_info = &audio_file.audio_file.tracks.track;
+    let audio_info = &audio_file.get_nice_object();
     let song_dbid = util::hash_from_path(track_path.clone());
+
+    let size_in_bytes = File::open(track_path)
+        .await
+        .unwrap()
+        .metadata()
+        .await
+        .unwrap()
+        .size() as u32;
 
     let mut track = XTrackItem::new(
         random(),
-        File::open(track_path)
-            .await
-            .unwrap()
-            .metadata()
-            .await
-            .unwrap()
-            .size() as u32,
+        size_in_bytes,
         (audio_info.duration * 1000.0) as u32,
         0,
         (audio_info.bit_rate / 1000) as u32,
-        audio_info.sample_rate as u32,
+        audio_info.sample_rate as u32 * 0x10000,
         song_dbid,
         0,
     );
+
+    track.data.mhii_link = size_in_bytes;
 
     if image_path.exists() {
         let _ = sender.send(AppEvent::ArtworkProgress((0, 2))).await;
@@ -122,7 +130,7 @@ async fn track_from_video(
         write_artwork_db(adb, &ipod_path);
 
         track.data.artwork_size = size as u32;
-        track.data.mhii_link = 0;
+        //track.data.mhii_link = 0;
         track.data.has_artwork = 1;
         track.data.artwork_count = 1;
         let _ = sender.send(AppEvent::ArtworkProgress((2, 2))).await;
@@ -149,18 +157,20 @@ async fn track_from_soundcloud(
     let audio_file = audio_file_info::from_path(track_path.to_str().unwrap())
         .await
         .unwrap();
-    let audio_info = &audio_file.audio_file.tracks.track;
+    let audio_info = &audio_file.get_nice_object();
     let song_dbid = util::hash_from_path(track_path.clone());
+
+    let size_in_bytes = File::open(track_path)
+        .await
+        .unwrap()
+        .metadata()
+        .await
+        .unwrap()
+        .size() as u32;
 
     let mut track = XTrackItem::new(
         value.id as u32,
-        File::open(track_path)
-            .await
-            .unwrap()
-            .metadata()
-            .await
-            .unwrap()
-            .size() as u32,
+        size_in_bytes,
         (audio_info.duration * 1000.0) as u32,
         0,
         (audio_info.bit_rate / 1000) as u32,
@@ -168,6 +178,8 @@ async fn track_from_soundcloud(
         song_dbid,
         0,
     );
+
+    track.data.mhii_link = size_in_bytes;
 
     if image_path.exists() {
         let _ = sender.send(AppEvent::ArtworkProgress((0, 2))).await;
@@ -192,7 +204,7 @@ async fn track_from_soundcloud(
         write_artwork_db(adb, &ipod_path);
 
         track.data.artwork_size = size as u32;
-        track.data.mhii_link = 0;
+        //track.data.mhii_link = 0;
         track.data.has_artwork = 1;
         track.data.artwork_count = 1;
         let _ = sender.send(AppEvent::ArtworkProgress((2, 2))).await;
@@ -249,6 +261,10 @@ fn get_itunesdb_location(path: &str) -> PathBuf {
 fn overwrite_database(database: &mut XDatabase, ipod_path: &String) {
     let data = serializer::to_bytes(database);
     let p: PathBuf = get_itunesdb_location(ipod_path);
+
+    let cd = get_backup_itunesdb();
+    let _ = std::fs::copy(&p, &cd);
+
     let mut file = std::fs::File::create(p).unwrap();
     let _ = file.write(&data);
 }
@@ -301,6 +317,7 @@ pub fn initialize_async_service(
                             AppEvent::RemoveTrack(id) => remove_track(id, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
                             AppEvent::RemovePlaylist((pl_id, is_hard)) => remove_playlist(pl_id, is_hard, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
                             AppEvent::RemoveTrackFromPlaylist((track_id, pl_id)) => remove_track_from_playlist(track_id, pl_id, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
+                            AppEvent::SearchFor(query) => track_search(query, database.as_mut().unwrap(), &sender).await,
                             _ => {}
                         }
                     }
@@ -308,6 +325,47 @@ pub fn initialize_async_service(
             }
         }
     });
+}
+
+async fn track_search(query: String, database: &mut XDatabase, sender: &Sender<AppEvent>) {
+    let mut results = Vec::new();
+
+    let query = query.to_lowercase();
+
+    if let XSomeList::TrackList(tracks) = &mut database.find_dataset(1).child {
+        let mut tracks: Vec<SearchEntry> = tracks
+            .iter()
+            .filter(|i| {
+                i.get_title().to_lowercase().contains(&query)
+                    || i.get_artist().to_lowercase().contains(&query)
+                    || i.get_album().to_lowercase().contains(&query)
+                    || i.get_genre().to_lowercase().contains(&query)
+            })
+            .map(|i| {
+                SearchEntry::track(
+                    i.data.unique_id as u64,
+                    i.get_title(),
+                    i.get_artist(),
+                    i.get_album(),
+                    i.get_genre(),
+                )
+            })
+            .collect();
+
+        results.append(&mut tracks);
+    }
+
+    if let XSomeList::Playlists(playlists) = &mut database.find_dataset(3).child {
+        let mut playlists = playlists
+            .iter()
+            .filter(|i| i.get_title().to_lowercase().contains(&query))
+            .map(|i| SearchEntry::playlist(i.data.persistent_playlist_id, i.get_title()))
+            .collect();
+
+        results.append(&mut playlists);
+    }
+
+    let _ = sender.send(AppEvent::SearchShow(results)).await;
 }
 
 async fn remove_track_from_playlist(
@@ -489,7 +547,7 @@ async fn load_from_fs(
     let audio_file = audio_file_info::from_path(path.to_str().unwrap())
         .await
         .unwrap();
-    let audio_info = &audio_file.audio_file.tracks.track;
+    let audio_info = &audio_file.get_nice_object();
 
     let song_dbid = util::hash_from_path(path.clone());
 
@@ -503,31 +561,41 @@ async fn load_from_fs(
 
         if let Ok(tag) = tag {
             year = tag.year();
-            title = tag.title().map_or(None, |s| Some(s.to_string()));
-            genre = tag.genre().map_or(None, |s| Some(s.to_string()));
-            artist = tag.artist().map_or(None, |s| Some(s.to_string()));
-            cover = tag.album_cover().map_or(None, |a| Some(a.data.to_vec()));
-            album = tag.album_title().map_or(None, |a| Some(a.to_string()));
+            title = tag.title().map(|s| s.to_string());
+            genre = tag.genre().map(|s| s.to_string());
+            artist = tag.artist().map(|s| s.to_string());
+            cover = tag.album_cover().map(|a| a.data.to_vec());
+            album = tag.album_title().map(|a| a.to_string());
         }
+
+        let size_in_bytes = File::open(path.clone())
+            .await
+            .unwrap()
+            .metadata()
+            .await
+            .unwrap()
+            .size() as u32;
 
         let mut track = XTrackItem::new(
             id,
-            File::open(path.clone())
-                .await
-                .unwrap()
-                .metadata()
-                .await
-                .unwrap()
-                .size() as u32,
+            size_in_bytes,
             (audio_info.duration * 1000.0) as u32,
             year.unwrap_or(0) as u32,
             (audio_info.bit_rate / 1000) as u32,
-            audio_info.sample_rate as u32,
+            (audio_info.sample_rate * 65536) as u32,
             song_dbid,
             0,
         );
 
         audio_file.modify_xtrack(&mut track);
+
+        track.data.gapless_album_flag = 1;
+        track.data.gapless_track_flag = 0;
+
+        track.data.mhii_link = size_in_bytes;
+        // mhii_link is used in certain entries as byte-size of audio file. Reason is unclear.
+        // without it, these files will be skipped before their end.
+        // it is also unclear, how can we combine this setting with availability of cover art.
 
         if let Some(title) = title {
             track.set_title(title.to_string());
@@ -565,7 +633,7 @@ async fn load_from_fs(
             write_artwork_db(adb, &ipod_path);
 
             track.data.artwork_size = size as u32;
-            track.data.mhii_link = 0;
+            //track.data.mhii_link = 0;
             track.data.has_artwork = 1;
             track.data.artwork_count = 1;
 
@@ -990,55 +1058,86 @@ mod audio_file_info {
 
     #[derive(Debug, Deserialize, PartialEq)]
     pub struct AudioInfo {
-        pub audio_file: AudioFileInfo,
+        streams: Vec<AudioStream>,
+        format: AudioFormat,
+    }
+
+    pub struct FormattedAudio {
+        pub sample_rate: u64,
+        pub audio_bytes: u64,
+        pub duration: f64,
+        pub bit_rate: u64,
     }
 
     #[derive(Debug, Deserialize, PartialEq)]
-    pub struct AudioFileInfo {
-        pub file_name: String,
-        pub file_type: String,
-        pub tracks: AudioFileTracks,
+    pub struct AudioStream {
+        codec_name: String,
+        sample_rate: Option<String>,
+        channels: Option<u8>,
+        sample_fmt: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize, PartialEq)]
+    pub struct AudioFormat {
+        duration: String,
+        size: String,
+        bit_rate: String,
     }
 
     impl AudioInfo {
-        pub fn get_audio_extension(&self) -> &str {
-            match self.audio_file.file_type.as_str() {
-                "'WAVE'" => "wav",
-                "'AIFF'" => "aif",
-                "'m4af'" => "m4a",
-                _ => "mp3",
+        pub fn get_nice_object(&self) -> FormattedAudio {
+            FormattedAudio {
+                bit_rate: self.format.bit_rate.parse().unwrap(),
+                duration: self.format.duration.parse().unwrap(),
+                audio_bytes: self.format.size.parse().unwrap(),
+                sample_rate: self
+                    .get_non_image_stream()
+                    .sample_rate
+                    .as_ref()
+                    .unwrap()
+                    .parse()
+                    .unwrap(),
             }
         }
 
+        pub fn get_audio_extension(&self) -> &str {
+            match self.get_non_image_stream().codec_name.as_str() {
+                "mp3" => "mp3",
+                "alac" | "aac" => "m4a",
+                _ => "wav",
+            }
+        }
+
+        fn get_non_image_stream(&self) -> &AudioStream {
+            self.streams
+                .iter()
+                .find(|i| i.codec_name != "mjpeg")
+                .unwrap()
+        }
+
         fn get_audio_codec(&self) -> String {
-            match self.audio_file.file_type.as_str() {
-                "'WAVE'" => "WAV audio file",
-                "'AIFF'" => "AIFF audio file",
-                "'m4af'" => match self.audio_file.tracks.track.format_type.as_str() {
-                    "alac" => "Apple Lossless audio file",
-                    _ => "AAC audio file",
-                },
-                _ => "MPEG audio file",
+            match self.get_non_image_stream().codec_name.as_str() {
+                "mp3" => "MPEG audio file",
+                "aac" => "AAC audio file",
+                "alac" => "Apple Lossless audio file",
+                _ => "WAV audio file",
             }
             .to_string()
         }
 
         pub fn modify_xtrack(&self, track: &mut XTrackItem) {
             track.data.type1 = 0;
-            track.data.type2 = if self.audio_file.file_type == "'MPG3'" {
+            track.data.type2 = if self.get_non_image_stream().codec_name == "mp3" {
                 1
             } else {
                 0
             };
 
-            let bytes = match self.audio_file.file_type.as_str() {
-                "'WAVE'" => "WAV",
-                "'AIFF'" => "AIF",
-                "'m4af'" => match self.audio_file.tracks.track.format_type.as_str() {
-                    "alac" => "M4A ",
-                    _ => "M4A",
-                },
-                _ => "MP3",
+            let bytes = match self.get_non_image_stream().codec_name.as_str() {
+                "mp3" => "MP3",
+                "aac" => "M4A",
+                "alac" => "M4A ",
+                _ => "WAV",
             }
             .as_bytes();
 
@@ -1054,25 +1153,16 @@ mod audio_file_info {
         }
     }
 
-    #[derive(Deserialize, Debug, PartialEq)]
-    pub struct AudioFileTracks {
-        pub track: AudioFileTrack,
-    }
-
-    #[derive(Debug, Deserialize, PartialEq)]
-    pub struct AudioFileTrack {
-        pub num_channels: u32,
-        pub sample_rate: u64,
-        pub format_type: String,
-        pub audio_bytes: u64,
-        pub duration: f64,
-        pub bit_rate: u64,
-    }
-
     pub async fn from_path(p: &str) -> Option<AudioInfo> {
-        let mut command = Command::new("afinfo");
-        command.arg("-x");
+        let mut command = Command::new("ffprobe");
+        command.arg("-i");
         command.arg(p);
+        command.arg("-print_format");
+        command.arg("json");
+        command.arg("-v");
+        command.arg("quiet");
+        command.arg("-show_entries");
+        command.arg("format=duration,size,bit_rate:stream=codec_name,width,height,sample_rate,channels,sample_fmt");
         command.stdout(Stdio::piped());
         command.stderr(Stdio::null());
 
@@ -1088,8 +1178,6 @@ mod audio_file_info {
             return None;
         }
 
-        /*let mut f = File::create("afinfo_out.xml").unwrap();
-        let _ = f.write(str.as_bytes());*/
-        Some(serde_xml_rs::from_str(String::from_utf8_lossy(vec.as_slice()).as_ref()).unwrap())
+        Some(serde_json::from_str(String::from_utf8_lossy(vec.as_slice()).as_ref()).unwrap())
     }
 }

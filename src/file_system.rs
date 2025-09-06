@@ -151,9 +151,10 @@ impl FileSystem {
         let mut dir = paths
             .filter_map(|res| res.ok())
             .filter(|p| {
-                p.path().extension().map_or(false, |s| {
-                    check_extension_compatibility(s.to_str().unwrap_or("none"))
-                }) || p.path().is_dir()
+                p.path()
+                    .extension()
+                    .is_some_and(|s| check_extension_compatibility(s.to_str().unwrap_or("none")))
+                    || p.path().is_dir()
             })
             .collect::<Vec<DirEntry>>();
         dir.sort_by(|a, b| {

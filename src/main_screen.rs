@@ -1,5 +1,6 @@
 use chrono::{DateTime, TimeZone, Utc};
 use crossterm::event::{KeyCode, KeyEvent};
+use ratatui::widgets::Clear;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
@@ -24,6 +25,8 @@ pub struct MainScreen {
     soundcloud: Option<Vec<CloudPlaylist>>,
     playlists: Option<Vec<DBPlaylist>>,
     sender: UnboundedSender<AppEvent>,
+    show_popup: bool,
+    popup_input: String,
 }
 
 impl AppScreen for MainScreen {
@@ -33,6 +36,7 @@ impl AppScreen for MainScreen {
             KeyCode::Left => self.previous_tab(),
             KeyCode::Up => self.previous_row(),
             KeyCode::Down => self.next_row(),
+            KeyCode::F(2) => self.search_popup(),
             KeyCode::F(5) => self.download_row(),
             KeyCode::F(8) => self.remove_row(),
             KeyCode::F(9) => self.remove_completely(),
@@ -42,11 +46,38 @@ impl AppScreen for MainScreen {
                     .sender
                     .send(AppEvent::SwitchScreen(AppState::FileSystem));
             }
+            KeyCode::Char(c) => {
+                if self.show_popup && (c.is_alphanumeric() || c.is_ascii_whitespace()) {
+                    self.popup_input.push(c);
+                }
+            }
+            KeyCode::Esc => {
+                if self.show_popup {
+                    self.show_popup = false;
+                    self.popup_input = String::default();
+                }
+            }
+            KeyCode::Backspace => {
+                if self.show_popup {
+                    self.popup_input.pop();
+                }
+            }
+            KeyCode::Enter => {
+                if self.show_popup {
+                    self.show_popup = false;
+                    let _ = self
+                        .sender
+                        .send(AppEvent::SearchFor(self.popup_input.clone()));
+                    self.popup_input = String::default();
+                }
+            }
             _ => {}
         }
     }
 
     fn render(&self, frame: &mut Frame) {
+        let size = frame.size();
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -79,6 +110,8 @@ impl AppScreen for MainScreen {
         let status_bar = Paragraph::new(Line::from(vec![
             "<TAB> SWITCH PANEL".bold(),
             " | ".dark_gray(),
+            "<F2> SEARCH".bold(),
+            " | ".dark_gray(),
             "<F4> FS MODE".bold(),
             " | ".dark_gray(),
             "<F5> DOWNLOAD".bold(),
@@ -91,6 +124,26 @@ impl AppScreen for MainScreen {
         ]))
         .centered();
         frame.render_widget(status_bar, chunks[2]);
+
+        if self.show_popup {
+            // Get a centered rect (50% width, 30% height)
+            let popup_area = self.centered_rect(30, 10, size);
+
+            // Clear background behind the popup
+            frame.render_widget(Clear, popup_area);
+
+            // Draw the popup block
+            let block = Block::default()
+                .title(" Search ")
+                .borders(Borders::ALL)
+                .border_type(ratatui::widgets::BorderType::Rounded);
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            // Example: input field
+            let paragraph = Paragraph::new(self.popup_input.as_str());
+            frame.render_widget(paragraph, inner);
+        }
     }
 
     fn as_any(&mut self) -> &mut dyn std::any::Any {
@@ -115,11 +168,48 @@ impl MainScreen {
                 "Settings".to_string(),
             ],
             sender,
+            show_popup: false,
+            popup_input: String::default(),
         }
     }
 
     fn switch_mode(&mut self) {
         self.set_mode(!self.mode);
+    }
+
+    fn centered_rect(&self, percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+        let popup_layout = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints(
+                [
+                    Constraint::Percentage((100 - percent_y) / 2),
+                    Constraint::Percentage(percent_y),
+                    Constraint::Percentage((100 - percent_y) / 2),
+                ]
+                .as_ref(),
+            )
+            .split(r);
+
+        let vertical_chunk = popup_layout[1];
+        let horizontal_layout = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(
+                [
+                    Constraint::Percentage((100 - percent_x) / 2),
+                    Constraint::Percentage(percent_x),
+                    Constraint::Percentage((100 - percent_x) / 2),
+                ]
+                .as_ref(),
+            )
+            .split(vertical_chunk);
+
+        horizontal_layout[1]
+    }
+
+    fn start_search(&self) {}
+
+    fn search_popup(&mut self) {
+        self.show_popup = true;
     }
 
     fn set_mode(&mut self, mode: bool) {

@@ -1,6 +1,6 @@
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn get_configs_dir() -> PathBuf {
     let mut p = dirs::home_dir().unwrap();
@@ -29,6 +29,24 @@ pub fn get_config_path() -> PathBuf {
 pub fn get_temp_itunesdb() -> PathBuf {
     let mut p = get_configs_dir();
     p.push("idb");
+    p
+}
+
+pub fn get_backup_itunesdb() -> PathBuf {
+    let mut p = get_configs_dir();
+    p.push("backup");
+    let _ = std::fs::create_dir_all(&p);
+    p.push(
+        [
+            "iTunesDB-",
+            &SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+                .to_string(),
+        ]
+        .concat(),
+    );
     p
 }
 

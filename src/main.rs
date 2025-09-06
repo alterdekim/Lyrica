@@ -1,4 +1,5 @@
 use crate::file_system::FileSystem;
+use crate::search_util::SearchScreen;
 use color_eyre::Result;
 use crossterm::{
     event::{
@@ -30,6 +31,7 @@ mod file_system;
 mod loading_screen;
 mod main_screen;
 mod screen;
+mod search_util;
 mod sync;
 mod util;
 mod wait_screen;
@@ -40,6 +42,7 @@ enum AppState {
     MainScreen,
     LoadingScreen,
     FileSystem,
+    SearchScreen,
 }
 
 pub struct App {
@@ -65,6 +68,10 @@ impl Default for App {
         screens.insert(AppState::MainScreen, Box::new(MainScreen::new(jx.clone())));
         screens.insert(AppState::LoadingScreen, Box::new(LoadingScreen::default()));
         screens.insert(AppState::FileSystem, Box::new(FileSystem::new(jx.clone())));
+        screens.insert(
+            AppState::SearchScreen,
+            Box::new(SearchScreen::new(jx.clone())),
+        );
 
         Self {
             receiver: rx,
@@ -135,6 +142,11 @@ impl App {
                     },
                     AppEvent::SwitchScreen(screen) => {
                         self.state = screen;
+                    }
+                    AppEvent::SearchShow(entries) => {
+                        let screen: &mut SearchScreen = self.get_screen(&AppState::SearchScreen);
+                        screen.show_search(entries);
+                        self.state = AppState::SearchScreen;
                     }
                     _ => {}
                 }
