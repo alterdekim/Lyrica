@@ -4,7 +4,7 @@
 
 Lightweight iPod manager, batteries included.
 
-#               
+#                
 
 <div align="center">
     <img src="https://w0n.zip/file/dRgjRe"/>
@@ -25,6 +25,7 @@ Lightweight iPod manager, batteries included.
 - iPod classic
 - Mac OS
 - [YT-DLP](https://github.com/yt-dlp/yt-dlp) A feature-rich command-line audio/video downloader.
+- ffprobe
 
 ## Install / Update
 
