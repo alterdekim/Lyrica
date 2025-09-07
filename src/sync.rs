@@ -9,6 +9,7 @@ use crate::{
     util, AppState,
 };
 use audiotags::Tag;
+use id3::TagLike;
 use image::imageops::FilterType;
 use image::ImageReader;
 use itunesdb::artworkdb::aobjects::ADatabase;
@@ -130,7 +131,6 @@ async fn track_from_video(
         write_artwork_db(adb, &ipod_path);
 
         track.data.artwork_size = size as u32;
-        //track.data.mhii_link = 0;
         track.data.has_artwork = 1;
         track.data.artwork_count = 1;
         let _ = sender.send(AppEvent::ArtworkProgress((2, 2))).await;
@@ -204,7 +204,6 @@ async fn track_from_soundcloud(
         write_artwork_db(adb, &ipod_path);
 
         track.data.artwork_size = size as u32;
-        //track.data.mhii_link = 0;
         track.data.has_artwork = 1;
         track.data.artwork_count = 1;
         let _ = sender.send(AppEvent::ArtworkProgress((2, 2))).await;
@@ -552,12 +551,22 @@ async fn load_from_fs(
     let song_dbid = util::hash_from_path(path.clone());
 
     if !database.if_track_in_library(song_dbid) {
+        let mut lyrics = 0;
+        if let Ok(idmpeg) = id3::Tag::read_from_path(&path) {
+            lyrics = idmpeg.lyrics().count();
+        }
+
         let mut year = None;
         let mut title = None;
         let mut genre = None;
         let mut artist = None;
         let mut cover = None;
         let mut album = None;
+
+        let mut track_number = None;
+        let mut total_tracks = None;
+        let mut disc_number = None;
+        let mut total_discs = None;
 
         if let Ok(tag) = tag {
             year = tag.year();
@@ -566,6 +575,11 @@ async fn load_from_fs(
             artist = tag.artist().map(|s| s.to_string());
             cover = tag.album_cover().map(|a| a.data.to_vec());
             album = tag.album_title().map(|a| a.to_string());
+
+            track_number = tag.track_number();
+            total_tracks = tag.total_tracks();
+            disc_number = tag.disc_number();
+            total_discs = tag.total_discs();
         }
 
         let size_in_bytes = File::open(path.clone())
@@ -593,9 +607,24 @@ async fn load_from_fs(
         track.data.gapless_track_flag = 0;
 
         track.data.mhii_link = size_in_bytes;
-        // mhii_link is used in certain entries as byte-size of audio file. Reason is unclear.
-        // without it, these files will be skipped before their end.
-        // it is also unclear, how can we combine this setting with availability of cover art.
+
+        track.data.lyrics_flag = (lyrics > 0) as u8;
+
+        if let Some(track_number) = track_number {
+            track.data.track_number = track_number as u32;
+        }
+
+        if let Some(total_tracks) = total_tracks {
+            track.data.total_tracks = total_tracks as u32;
+        }
+
+        if let Some(disc_number) = disc_number {
+            track.data.disc_number = disc_number as u32;
+        }
+
+        if let Some(total_discs) = total_discs {
+            track.data.total_discs = total_discs as u32;
+        }
 
         if let Some(title) = title {
             track.set_title(title.to_string());
@@ -633,7 +662,6 @@ async fn load_from_fs(
             write_artwork_db(adb, &ipod_path);
 
             track.data.artwork_size = size as u32;
-            //track.data.mhii_link = 0;
             track.data.has_artwork = 1;
             track.data.artwork_count = 1;
 

@@ -4,7 +4,7 @@
 
 Lightweight iPod manager, batteries included.
 
-#                
+#                         
 
 <div align="center">
     <img src="https://w0n.zip/file/dRgjRe"/>
@@ -15,10 +15,29 @@ Lightweight iPod manager, batteries included.
 
 ## Features
 
-- **Basic operations**: Load songs from filesystem to ipod. Manually delete anything if needed.
-- **Streamings**: Download playlists from Soundcloud, Youtube to your iPod.
-- **No iTunes**: Finally you can get rid of iTunes or Apple Music. Marvelous!
-- **Playlists**: Create/remove/edit playlists on your ipod
+#### Basic operations
+
+- Load songs from filesystem
+- Load playlists from filesystem
+- Export playlists to filesystem
+- Export tracks to filesystem
+- Create/Remove playlists
+- Add/Remove track from playlist
+- Manually edit metadata of track
+- Create/Remove smart playlists
+- Search for tracks/playlists in db
+
+#### Online services
+
+- Download tracks/playlists from Soundcloud, Youtube
+- Retrieve metadata for track from MusicBrainz
+- Identify track using chromaprint
+
+#### Supported codecs
+
+Supported codecs: MP3, AAC, ALAC, AIFF, WAV
+
+#### Metadata import support
 
 ## Requirements
 
