@@ -1,5 +1,5 @@
 use crate::component::table::SmartTable;
-use crate::screen::AppScreen;
+use crate::screens::AppScreen;
 use crate::sync::AppEvent;
 use crate::AppState;
 use crossterm::event::{KeyCode, KeyEvent};
@@ -9,6 +9,23 @@ use ratatui::widgets::Paragraph;
 use ratatui::Frame;
 use std::any::Any;
 use tokio::sync::mpsc::UnboundedSender;
+
+fn table() -> SmartTable {
+    SmartTable::new(
+        ["Id", "Title", "Artist", "Album", "Genre", "Type"]
+            .iter_mut()
+            .map(|s| s.to_string())
+            .collect(),
+        vec![
+            Constraint::Length(16),
+            Constraint::Percentage(60),
+            Constraint::Percentage(20),
+            Constraint::Percentage(10),
+            Constraint::Percentage(10),
+            Constraint::Length(10),
+        ],
+    )
+}
 
 pub struct SearchScreen {
     table: SmartTable,
@@ -55,27 +72,11 @@ impl AppScreen for SearchScreen {
 
 impl SearchScreen {
     pub fn new(sender: UnboundedSender<AppEvent>) -> Self {
-        let table = SmartTable::new(
-            ["Id", "Title", "Artist", "Album", "Genre", "Type"]
-                .iter_mut()
-                .map(|s| s.to_string())
-                .collect(),
-            vec![
-                Constraint::Length(16),
-                Constraint::Percentage(60),
-                Constraint::Percentage(20),
-                Constraint::Percentage(10),
-                Constraint::Percentage(10),
-                Constraint::Length(10),
-            ],
-        );
-
-        let mut a = Self {
-            table,
+        Self {
+            table: table(),
             sender,
             entries: None,
-        };
-        a
+        }
     }
 
     fn remove_row(&mut self) {
@@ -92,20 +93,7 @@ impl SearchScreen {
     }
 
     pub fn show_search(&mut self, entries: Vec<SearchEntry>) {
-        self.table = SmartTable::new(
-            ["Id", "Title", "Artist", "Album", "Genre", "Type"]
-                .iter_mut()
-                .map(|s| s.to_string())
-                .collect(),
-            vec![
-                Constraint::Length(16),
-                Constraint::Percentage(60),
-                Constraint::Percentage(20),
-                Constraint::Percentage(10),
-                Constraint::Percentage(10),
-                Constraint::Length(10),
-            ],
-        );
+        self.table = table();
 
         self.table.set_title(String::from("Search results"));
 

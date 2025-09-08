@@ -1,5 +1,5 @@
 use crate::config::get_backup_itunesdb;
-use crate::search_util::SearchEntry;
+use crate::screens::search_util::SearchEntry;
 use crate::util::IPodImage;
 use crate::{
     config::{
@@ -1092,7 +1092,6 @@ mod audio_file_info {
 
     pub struct FormattedAudio {
         pub sample_rate: u64,
-        pub audio_bytes: u64,
         pub duration: f64,
         pub bit_rate: u64,
     }
@@ -1117,7 +1116,6 @@ mod audio_file_info {
             FormattedAudio {
                 bit_rate: self.format.bit_rate.parse().unwrap(),
                 duration: self.format.duration.parse().unwrap(),
-                audio_bytes: self.format.size.parse().unwrap(),
                 sample_rate: self
                     .get_non_image_stream()
                     .sample_rate

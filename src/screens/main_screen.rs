@@ -13,7 +13,27 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::component::table::SmartTable;
 use crate::sync::{DBPlaylist, YTPlaylist};
-use crate::{screen::AppScreen, sync::AppEvent, AppState};
+use crate::{screens::AppScreen, sync::AppEvent, AppState};
+
+fn rect_layout(percent: u16) -> Layout {
+    Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            [
+                Constraint::Percentage((100 - percent) / 2),
+                Constraint::Percentage(percent),
+                Constraint::Percentage((100 - percent) / 2),
+            ]
+            .as_ref(),
+        )
+}
+
+fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
+    let popup_layout = rect_layout(percent_y).split(r);
+    let vertical_chunk = popup_layout[1];
+    let horizontal_layout = rect_layout(percent_x).split(vertical_chunk);
+    horizontal_layout[1]
+}
 
 pub struct MainScreen {
     mode: bool,
@@ -127,7 +147,7 @@ impl AppScreen for MainScreen {
 
         if self.show_popup {
             // Get a centered rect (50% width, 30% height)
-            let popup_area = self.centered_rect(30, 10, size);
+            let popup_area = centered_rect(30, 10, size);
 
             // Clear background behind the popup
             frame.render_widget(Clear, popup_area);
@@ -176,37 +196,6 @@ impl MainScreen {
     fn switch_mode(&mut self) {
         self.set_mode(!self.mode);
     }
-
-    fn centered_rect(&self, percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-        let popup_layout = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints(
-                [
-                    Constraint::Percentage((100 - percent_y) / 2),
-                    Constraint::Percentage(percent_y),
-                    Constraint::Percentage((100 - percent_y) / 2),
-                ]
-                .as_ref(),
-            )
-            .split(r);
-
-        let vertical_chunk = popup_layout[1];
-        let horizontal_layout = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(
-                [
-                    Constraint::Percentage((100 - percent_x) / 2),
-                    Constraint::Percentage(percent_x),
-                    Constraint::Percentage((100 - percent_x) / 2),
-                ]
-                .as_ref(),
-            )
-            .split(vertical_chunk);
-
-        horizontal_layout[1]
-    }
-
-    fn start_search(&self) {}
 
     fn search_popup(&mut self) {
         self.show_popup = true;

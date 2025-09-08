@@ -1,4 +1,4 @@
-use crate::screen::AppScreen;
+use crate::screens::AppScreen;
 use ratatui::layout::{Constraint, Direction, Flex, Layout};
 use ratatui::widgets::Paragraph;
 use ratatui::{

@@ -6,7 +6,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{dlp::DownloadProgress, screen::AppScreen};
+use crate::{dlp::DownloadProgress, screens::AppScreen};
 
 #[derive(Default)]
 pub struct LoadingScreen {

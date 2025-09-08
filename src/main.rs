@@ -1,5 +1,3 @@
-use crate::file_system::FileSystem;
-use crate::search_util::SearchScreen;
 use color_eyre::Result;
 use crossterm::{
     event::{
@@ -10,31 +8,28 @@ use crossterm::{
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use futures::StreamExt;
-use loading_screen::LoadingScreen;
-use main_screen::MainScreen;
 use ratatui::{
     prelude::{Backend, CrosstermBackend},
     Frame, Terminal,
 };
-use screen::AppScreen;
+use screens::file_system::FileSystem;
+use screens::loading_screen::LoadingScreen;
+use screens::main_screen::MainScreen;
+use screens::search_util::SearchScreen;
+use screens::wait_screen::WaitScreen;
+use screens::AppScreen;
 use std::time::Duration;
 use std::{collections::HashMap, error::Error, io};
 use sync::AppEvent;
 use tokio::sync::mpsc::{self, Receiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
-use wait_screen::WaitScreen;
 
 mod component;
 mod config;
 mod dlp;
-mod file_system;
-mod loading_screen;
-mod main_screen;
-mod screen;
-mod search_util;
+mod screens;
 mod sync;
 mod util;
-mod wait_screen;
 
 #[derive(Eq, Hash, PartialEq)]
 enum AppState {
