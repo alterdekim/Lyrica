@@ -8,67 +8,15 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Tabs},
     Frame,
 };
-use soundcloud::sobjects::CloudPlaylist;
 use std::collections::HashMap;
 use strum::{EnumCount, IntoEnumIterator};
-use strum_macros::{EnumCount as EnumCountMacro, EnumIter};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::component::table::SmartTable;
-use crate::sync::{DBPlaylist, YTPlaylist};
+use crate::screens::main_screen::util::{TabContent, TabType};
 use crate::{screens::AppScreen, sync::AppEvent, AppState};
 
-fn rect_layout(direction: Direction, percent: u16) -> Layout {
-    Layout::default().direction(direction).constraints(
-        [
-            Constraint::Percentage((100 - percent) / 2),
-            Constraint::Percentage(percent),
-            Constraint::Percentage((100 - percent) / 2),
-        ]
-        .as_ref(),
-    )
-}
-
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = rect_layout(Direction::Vertical, percent_y).split(r);
-    let vertical_chunk = popup_layout[1];
-    let horizontal_layout = rect_layout(Direction::Horizontal, percent_x).split(vertical_chunk);
-    horizontal_layout[1]
-}
-
-#[derive(Debug, EnumCountMacro, EnumIter, Eq, Hash, PartialEq, Clone, Copy)]
-pub enum TabType {
-    Youtube,
-    Soundcloud,
-    Playlists,
-}
-
-impl From<i8> for TabType {
-    fn from(value: i8) -> Self {
-        match value {
-            0 => TabType::Youtube,
-            1 => TabType::Soundcloud,
-            _ => TabType::Playlists,
-        }
-    }
-}
-
-impl From<TabType> for String {
-    fn from(value: TabType) -> Self {
-        match value {
-            TabType::Youtube => "YouTube",
-            TabType::Soundcloud => "SoundCloud",
-            TabType::Playlists => "Local Playlists",
-        }
-        .to_string()
-    }
-}
-
-pub enum TabContent {
-    Youtube(Vec<YTPlaylist>),
-    SoundCloud(Vec<CloudPlaylist>),
-    Playlists(Vec<DBPlaylist>),
-}
+pub(crate) mod util;
 
 pub struct MainScreen {
     mode: bool,
@@ -189,7 +137,7 @@ impl AppScreen for MainScreen {
 
         if self.show_popup {
             // Get a centered rect (50% width, 30% height)
-            let popup_area = centered_rect(30, 10, size);
+            let popup_area = util::centered_rect(30, 10, size);
 
             // Clear background behind the popup
             frame.render_widget(Clear, popup_area);

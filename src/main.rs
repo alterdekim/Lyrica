@@ -1,4 +1,4 @@
-use crate::screens::main_screen::{TabContent, TabType};
+use crate::screens::main_screen::util::{TabContent, TabType};
 use color_eyre::Result;
 use crossterm::{
     event::{
