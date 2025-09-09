@@ -1,4 +1,4 @@
-use crate::sync::{DBPlaylist, YTPlaylist};
+use crate::sync::sync_util::{DBPlaylist, YTPlaylist};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use soundcloud::sobjects::CloudPlaylist;
 use strum_macros::{EnumCount as EnumCountMacro, EnumIter};

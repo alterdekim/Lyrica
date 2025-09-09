@@ -1,5 +1,5 @@
 use crate::component::table::SmartTable;
-use crate::sync::AppEvent;
+use crate::sync::sync_util::AppEvent;
 use crate::{screens::AppScreen, AppState};
 use chrono::{DateTime, Utc};
 use crossterm::event::KeyCode;

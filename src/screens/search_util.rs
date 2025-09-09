@@ -1,6 +1,6 @@
 use crate::component::table::SmartTable;
 use crate::screens::AppScreen;
-use crate::sync::AppEvent;
+use crate::sync::sync_util::AppEvent;
 use crate::AppState;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};

@@ -21,7 +21,7 @@ use screens::wait_screen::WaitScreen;
 use screens::AppScreen;
 use std::time::Duration;
 use std::{collections::HashMap, error::Error, io};
-use sync::AppEvent;
+use sync::sync_util::AppEvent;
 use tokio::sync::mpsc::{self, Receiver, UnboundedSender};
 use tokio_util::sync::CancellationToken;
 

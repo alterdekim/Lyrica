@@ -8,7 +8,7 @@ use tokio::{
     sync::mpsc::Sender,
 };
 
-use crate::sync::AppEvent;
+use crate::sync::sync_util::AppEvent;
 
 #[derive(Debug, Deserialize)]
 pub struct DownloadProgress {

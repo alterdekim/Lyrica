@@ -14,7 +14,7 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::component::table::SmartTable;
 use crate::screens::main_screen::util::{TabContent, TabType};
-use crate::{screens::AppScreen, sync::AppEvent, AppState};
+use crate::{screens::AppScreen, sync::sync_util::AppEvent, AppState};
 
 pub(crate) mod util;
 

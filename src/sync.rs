@@ -1,11 +1,12 @@
 use crate::config::get_backup_itunesdb;
 use crate::screens::search_util::SearchEntry;
+use crate::sync::sync_util::{AppEvent, DBPlaylist, YTPlaylist};
 use crate::util::IPodImage;
 use crate::{
     config::{
         get_config_path, get_configs_dir, get_temp_dl_dir, get_temp_itunesdb, LyricaConfiguration,
     },
-    dlp::{self, DownloadProgress},
+    dlp::{self},
     util, AppState,
 };
 use audiotags::Tag;
@@ -31,43 +32,9 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use youtube_api::objects::YoutubeVideo;
 
-pub enum AppEvent {
-    SearchIPod,
-    IPodNotFound,
-    ITunesParsed(Vec<DBPlaylist>),
-    YoutubeGot(Vec<YTPlaylist>),
-    SoundcloudGot(CloudPlaylists),
-    DownloadPlaylist(CloudPlaylist),
-    DownloadTrack(CloudTrack),
-    DownloadYTPlaylist(YTPlaylist),
-    DownloadYTTrack(YoutubeVideo),
-    CurrentProgress(DownloadProgress),
-    OverallProgress((u32, u32, ratatui::style::Color)),
-    ArtworkProgress((u32, u32)),
-    SwitchScreen(AppState),
-    LoadFromFS(PathBuf),
-    LoadFromFSVec(Vec<PathBuf>),
-    LoadFromFSPL((Vec<PathBuf>, String)),
-    RemoveTrack(u32),
-    RemovePlaylist((u64, bool)),
-    RemoveTrackFromPlaylist((u32, u64)),
-    SearchFor(String),
-    SearchShow(Vec<SearchEntry>),
-}
-
-pub struct DBPlaylist {
-    pub id: u64,
-    pub title: String,
-    pub timestamp: u32,
-    pub tracks: Vec<XTrackItem>,
-}
-
-#[derive(Clone)]
-pub struct YTPlaylist {
-    pub title: String,
-    pub url: String,
-    pub videos: Vec<YoutubeVideo>,
-}
+mod audio_file_info;
+mod manager;
+pub mod sync_util;
 
 async fn track_from_video(
     value: &YoutubeVideo,
@@ -313,9 +280,9 @@ pub fn initialize_async_service(
                             },
                             AppEvent::LoadFromFSVec(files) => load_files_from_fs(files, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
                             AppEvent::LoadFromFSPL((files, title)) => load_files_from_fs_as_playlist(files, title, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
-                            AppEvent::RemoveTrack(id) => remove_track(id, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
-                            AppEvent::RemovePlaylist((pl_id, is_hard)) => remove_playlist(pl_id, is_hard, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
-                            AppEvent::RemoveTrackFromPlaylist((track_id, pl_id)) => remove_track_from_playlist(track_id, pl_id, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
+                            AppEvent::RemoveTrack(id) => manager::remove_track(id, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
+                            AppEvent::RemovePlaylist((pl_id, is_hard)) => manager::remove_playlist(pl_id, is_hard, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
+                            AppEvent::RemoveTrackFromPlaylist((track_id, pl_id)) => manager::remove_track_from_playlist(track_id, pl_id, database.as_mut().unwrap(), &sender, ipod_db.clone().unwrap()).await,
                             AppEvent::SearchFor(query) => track_search(query, database.as_mut().unwrap(), &sender).await,
                             _ => {}
                         }
@@ -365,110 +332,6 @@ async fn track_search(query: String, database: &mut XDatabase, sender: &Sender<A
     }
 
     let _ = sender.send(AppEvent::SearchShow(results)).await;
-}
-
-async fn remove_track_from_playlist(
-    track_id: u32,
-    pl_id: u64,
-    database: &mut XDatabase,
-    sender: &Sender<AppEvent>,
-    ipod_path: String,
-) {
-    let _ = sender
-        .send(AppEvent::OverallProgress((0, 1, Color::Red)))
-        .await;
-
-    database.remove_track_from_playlist(track_id, pl_id);
-
-    let _ = sender
-        .send(AppEvent::OverallProgress((1, 1, Color::Red)))
-        .await;
-
-    let _ = sender
-        .send(AppEvent::SwitchScreen(AppState::MainScreen))
-        .await;
-
-    let _ = sender
-        .send(AppEvent::ITunesParsed(get_playlists(database)))
-        .await;
-
-    overwrite_database(database, &ipod_path);
-}
-
-async fn remove_playlist(
-    pl_id: u64,
-    is_hard: bool,
-    database: &mut XDatabase,
-    sender: &Sender<AppEvent>,
-    ipod_path: String,
-) {
-    if is_hard {
-        let pls = database.get_playlists();
-        let pl = pls.iter().find(|p| p.data.persistent_playlist_id == pl_id);
-        if pl.is_none() {
-            return;
-        }
-        let pl = pl.unwrap();
-        let max = pl.elems.len();
-        let mut i = 1;
-        for (item, _args) in pl.elems.iter() {
-            let _ = sender
-                .send(AppEvent::OverallProgress((i, max as u32, Color::Red)))
-                .await;
-            remove_track(item.track_id, database, sender, ipod_path.clone()).await;
-            i += 1;
-        }
-    }
-
-    let _ = sender
-        .send(AppEvent::OverallProgress((0, 1, Color::Red)))
-        .await;
-
-    database.remove_playlist(pl_id);
-
-    let _ = sender
-        .send(AppEvent::OverallProgress((1, 1, Color::Red)))
-        .await;
-
-    let _ = sender
-        .send(AppEvent::SwitchScreen(AppState::MainScreen))
-        .await;
-
-    let _ = sender
-        .send(AppEvent::ITunesParsed(get_playlists(database)))
-        .await;
-
-    overwrite_database(database, &ipod_path);
-}
-
-async fn remove_track(
-    id: u32,
-    database: &mut XDatabase,
-    sender: &Sender<AppEvent>,
-    ipod_path: String,
-) {
-    let _ = sender
-        .send(AppEvent::OverallProgress((0, 1, Color::Red)))
-        .await;
-    database.remove_track_completely(id);
-    for ext in ["mp3", "m4a", "wav", "aif"].iter() {
-        let dest = get_full_track_location(PathBuf::from(ipod_path.clone()), id, ext);
-        let _ = std::fs::remove_file(dest);
-    }
-
-    let _ = sender
-        .send(AppEvent::OverallProgress((1, 1, Color::Red)))
-        .await;
-
-    let _ = sender
-        .send(AppEvent::SwitchScreen(AppState::MainScreen))
-        .await;
-
-    let _ = sender
-        .send(AppEvent::ITunesParsed(get_playlists(database)))
-        .await;
-
-    overwrite_database(database, &ipod_path);
 }
 
 async fn load_files_from_fs_as_playlist(
@@ -1075,135 +938,4 @@ async fn parse_itunes(sender: &Sender<AppEvent>, path: String) -> XDatabase {
     });
 
     database
-}
-
-mod audio_file_info {
-    use itunesdb::xobjects::XTrackItem;
-    use serde::Deserialize;
-    use std::process::Stdio;
-    use tokio::io::{AsyncReadExt, BufReader};
-    use tokio::process::Command;
-
-    #[derive(Debug, Deserialize, PartialEq)]
-    pub struct AudioInfo {
-        streams: Vec<AudioStream>,
-        format: AudioFormat,
-    }
-
-    pub struct FormattedAudio {
-        pub sample_rate: u64,
-        pub duration: f64,
-        pub bit_rate: u64,
-    }
-
-    #[derive(Debug, Deserialize, PartialEq)]
-    pub struct AudioStream {
-        codec_name: String,
-        sample_rate: Option<String>,
-        channels: Option<u8>,
-        sample_fmt: Option<String>,
-    }
-
-    #[derive(Debug, Deserialize, PartialEq)]
-    pub struct AudioFormat {
-        duration: String,
-        size: String,
-        bit_rate: String,
-    }
-
-    impl AudioInfo {
-        pub fn get_nice_object(&self) -> FormattedAudio {
-            FormattedAudio {
-                bit_rate: self.format.bit_rate.parse().unwrap(),
-                duration: self.format.duration.parse().unwrap(),
-                sample_rate: self
-                    .get_non_image_stream()
-                    .sample_rate
-                    .as_ref()
-                    .unwrap()
-                    .parse()
-                    .unwrap(),
-            }
-        }
-
-        pub fn get_audio_extension(&self) -> &str {
-            match self.get_non_image_stream().codec_name.as_str() {
-                "mp3" => "mp3",
-                "alac" | "aac" => "m4a",
-                _ => "wav",
-            }
-        }
-
-        fn get_non_image_stream(&self) -> &AudioStream {
-            self.streams
-                .iter()
-                .find(|i| i.codec_name != "mjpeg")
-                .unwrap()
-        }
-
-        fn get_audio_codec(&self) -> String {
-            match self.get_non_image_stream().codec_name.as_str() {
-                "mp3" => "MPEG audio file",
-                "aac" => "AAC audio file",
-                "alac" => "Apple Lossless audio file",
-                _ => "WAV audio file",
-            }
-            .to_string()
-        }
-
-        pub fn modify_xtrack(&self, track: &mut XTrackItem) {
-            track.data.type1 = 0;
-            track.data.type2 = if self.get_non_image_stream().codec_name == "mp3" {
-                1
-            } else {
-                0
-            };
-
-            let bytes = match self.get_non_image_stream().codec_name.as_str() {
-                "mp3" => "MP3",
-                "aac" => "M4A",
-                "alac" => "M4A ",
-                _ => "WAV",
-            }
-            .as_bytes();
-
-            let file_type = u32::from_be_bytes(if bytes.len() == 4 {
-                [bytes[0], bytes[1], bytes[2], bytes[3]]
-            } else {
-                [bytes[0], bytes[1], bytes[2], 0u8]
-            });
-
-            track.data.filetype = file_type;
-
-            track.update_arg(6, self.get_audio_codec());
-        }
-    }
-
-    pub async fn from_path(p: &str) -> Option<AudioInfo> {
-        let mut command = Command::new("ffprobe");
-        command.arg("-i");
-        command.arg(p);
-        command.arg("-print_format");
-        command.arg("json");
-        command.arg("-v");
-        command.arg("quiet");
-        command.arg("-show_entries");
-        command.arg("format=duration,size,bit_rate:stream=codec_name,width,height,sample_rate,channels,sample_fmt");
-        command.stdout(Stdio::piped());
-        command.stderr(Stdio::null());
-
-        let mut child = command.spawn().unwrap();
-
-        let mut vec = Vec::new();
-        let stdout = child.stdout.take().unwrap();
-        let size = BufReader::new(stdout)
-            .read_to_end(&mut vec)
-            .await
-            .unwrap_or(0);
-        if size == 0 {
-            return None;
-        }
-
-        Some(serde_json::from_str(String::from_utf8_lossy(vec.as_slice()).as_ref()).unwrap())
-    }
 }
