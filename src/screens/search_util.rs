@@ -44,7 +44,6 @@ impl AppScreen for SearchScreen {
                     .send(AppEvent::SwitchScreen(AppState::MainScreen));
             }
             KeyCode::F(8) => self.remove_row(),
-            KeyCode::F(9) => {}
             _ => {}
         }
     }
@@ -61,7 +60,12 @@ impl AppScreen for SearchScreen {
         self.render_main(frame, chunks[0]);
 
         // Render Status Bar
-        let status_bar = Paragraph::new(Line::from(vec!["<ESC> QUIT".bold()])).centered();
+        let status_bar = Paragraph::new(Line::from(vec![
+            "<ESC> GO BACK".bold(),
+            " | ".dark_gray(),
+            "<F10> QUIT".bold(),
+        ]))
+        .centered();
         frame.render_widget(status_bar, chunks[1]); // Render into third chunk
     }
 

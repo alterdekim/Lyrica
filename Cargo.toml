@@ -29,6 +29,8 @@ audiotags = "0.5.0"
 image = "0.25.5"
 twox-hash = "2.1.0"
 id3 = "1.16.3"
+strum = "0.27"
+strum_macros = "0.27"
 
 [profile.release]
 strip = true

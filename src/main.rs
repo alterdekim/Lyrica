@@ -1,3 +1,4 @@
+use crate::screens::main_screen::{TabContent, TabType};
 use color_eyre::Result;
 use crossterm::{
     event::{
@@ -109,15 +110,15 @@ impl App {
                     },
                     AppEvent::ITunesParsed(playlists) => {
                         let screen: &mut MainScreen = self.get_screen(&AppState::MainScreen);
-                        screen.set_itunes(playlists);
+                        screen.set_playlists(TabType::Playlists, TabContent::Playlists(playlists));
                     },
                     AppEvent::SoundcloudGot(playlists) => {
                         let screen: &mut MainScreen = self.get_screen(&AppState::MainScreen);
-                        screen.set_soundcloud_playlists(playlists);
+                        screen.set_playlists(TabType::Soundcloud, TabContent::SoundCloud(playlists.collection));
                     },
                     AppEvent::YoutubeGot(playlists) => {
                         let screen: &mut MainScreen = self.get_screen(&AppState::MainScreen);
-                        screen.set_youtube_playlists(playlists);
+                        screen.set_playlists(TabType::Youtube, TabContent::Youtube(playlists));
                     },
                     AppEvent::OverallProgress((c, max, color)) => {
                         self.state = AppState::LoadingScreen;
@@ -157,7 +158,7 @@ impl App {
             .get_mut(&self.state)
             .unwrap()
             .handle_key_event(key_event);
-        if let KeyCode::Char('q') = key_event.code {
+        if let KeyCode::F(10) = key_event.code {
             self.exit()
         }
     }

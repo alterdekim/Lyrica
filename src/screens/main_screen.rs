@@ -8,31 +8,66 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph, Tabs},
     Frame,
 };
-use soundcloud::sobjects::{CloudPlaylist, CloudPlaylists};
+use soundcloud::sobjects::CloudPlaylist;
+use std::collections::HashMap;
+use strum::{EnumCount, IntoEnumIterator};
+use strum_macros::{EnumCount as EnumCountMacro, EnumIter};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::component::table::SmartTable;
 use crate::sync::{DBPlaylist, YTPlaylist};
 use crate::{screens::AppScreen, sync::AppEvent, AppState};
 
-fn rect_layout(percent: u16) -> Layout {
-    Layout::default()
-        .direction(Direction::Vertical)
-        .constraints(
-            [
-                Constraint::Percentage((100 - percent) / 2),
-                Constraint::Percentage(percent),
-                Constraint::Percentage((100 - percent) / 2),
-            ]
-            .as_ref(),
-        )
+fn rect_layout(direction: Direction, percent: u16) -> Layout {
+    Layout::default().direction(direction).constraints(
+        [
+            Constraint::Percentage((100 - percent) / 2),
+            Constraint::Percentage(percent),
+            Constraint::Percentage((100 - percent) / 2),
+        ]
+        .as_ref(),
+    )
 }
 
 fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = rect_layout(percent_y).split(r);
+    let popup_layout = rect_layout(Direction::Vertical, percent_y).split(r);
     let vertical_chunk = popup_layout[1];
-    let horizontal_layout = rect_layout(percent_x).split(vertical_chunk);
+    let horizontal_layout = rect_layout(Direction::Horizontal, percent_x).split(vertical_chunk);
     horizontal_layout[1]
+}
+
+#[derive(Debug, EnumCountMacro, EnumIter, Eq, Hash, PartialEq, Clone, Copy)]
+pub enum TabType {
+    Youtube,
+    Soundcloud,
+    Playlists,
+}
+
+impl From<i8> for TabType {
+    fn from(value: i8) -> Self {
+        match value {
+            0 => TabType::Youtube,
+            1 => TabType::Soundcloud,
+            _ => TabType::Playlists,
+        }
+    }
+}
+
+impl From<TabType> for String {
+    fn from(value: TabType) -> Self {
+        match value {
+            TabType::Youtube => "YouTube",
+            TabType::Soundcloud => "SoundCloud",
+            TabType::Playlists => "Local Playlists",
+        }
+        .to_string()
+    }
+}
+
+pub enum TabContent {
+    Youtube(Vec<YTPlaylist>),
+    SoundCloud(Vec<CloudPlaylist>),
+    Playlists(Vec<DBPlaylist>),
 }
 
 pub struct MainScreen {
@@ -40,10 +75,7 @@ pub struct MainScreen {
     selected_tab: i8,
     pl_table: SmartTable,
     song_table: SmartTable,
-    tab_titles: Vec<String>,
-    youtube: Option<Vec<YTPlaylist>>,
-    soundcloud: Option<Vec<CloudPlaylist>>,
-    playlists: Option<Vec<DBPlaylist>>,
+    tab_content: HashMap<TabType, TabContent>,
     sender: UnboundedSender<AppEvent>,
     show_popup: bool,
     popup_input: String,
@@ -96,7 +128,7 @@ impl AppScreen for MainScreen {
     }
 
     fn render(&self, frame: &mut Frame) {
-        let size = frame.size();
+        let size = frame.area();
 
         let chunks = Layout::default()
             .direction(Direction::Vertical)
@@ -108,9 +140,8 @@ impl AppScreen for MainScreen {
             .split(frame.area());
 
         let tabs = Tabs::new(
-            self.tab_titles
-                .iter()
-                .map(|t| Span::raw(t.clone()))
+            TabType::iter()
+                .map(|t| Span::raw(String::from(t).clone()))
                 .collect::<Vec<Span>>(),
         )
         .block(Block::default().borders(Borders::ALL))
@@ -127,21 +158,32 @@ impl AppScreen for MainScreen {
         self.render_tab(frame, chunks[1]);
 
         // Render Status Bar
-        let status_bar = Paragraph::new(Line::from(vec![
-            "<TAB> SWITCH PANEL".bold(),
-            " | ".dark_gray(),
-            "<F2> SEARCH".bold(),
-            " | ".dark_gray(),
-            "<F4> FS MODE".bold(),
-            " | ".dark_gray(),
-            "<F5> DOWNLOAD".bold(),
-            " | ".dark_gray(),
-            "<F8> DEL".bold(),
-            " | ".dark_gray(),
-            "<F9> DEL REC".bold(),
-            " | ".dark_gray(),
-            "<Q> QUIT".bold(),
-        ]))
+        let status_bar = Paragraph::new(Line::from(match TabType::from(self.selected_tab) {
+            TabType::Youtube | TabType::Soundcloud => {
+                vec![
+                    "<F2> SEARCH".bold(),
+                    " | ".dark_gray(),
+                    "<F4> IMPORT".bold(),
+                    " | ".dark_gray(),
+                    "<F5> DOWNLOAD".bold(),
+                    " | ".dark_gray(),
+                    "<F10> QUIT".bold(),
+                ]
+            }
+            TabType::Playlists => {
+                vec![
+                    "<F2> SEARCH".bold(),
+                    " | ".dark_gray(),
+                    "<F4> IMPORT".bold(),
+                    " | ".dark_gray(),
+                    "<F8> REMOVE".bold(),
+                    " | ".dark_gray(),
+                    "<F9> DELETE".bold(),
+                    " | ".dark_gray(),
+                    "<F10> QUIT".bold(),
+                ]
+            }
+        }))
         .centered();
         frame.render_widget(status_bar, chunks[2]);
 
@@ -177,19 +219,11 @@ impl MainScreen {
             mode: false,
             pl_table: SmartTable::default(),
             song_table: SmartTable::default(),
-            soundcloud: None,
-            youtube: None,
-            playlists: None,
             selected_tab: 0,
-            tab_titles: vec![
-                "YouTube".to_string(),
-                "SoundCloud".to_string(),
-                "iPod".to_string(),
-                "Settings".to_string(),
-            ],
             sender,
             show_popup: false,
             popup_input: String::default(),
+            tab_content: HashMap::new(),
         }
     }
 
@@ -210,7 +244,7 @@ impl MainScreen {
     fn next_tab(&mut self) {
         self.selected_tab = std::cmp::min(
             self.selected_tab + 1,
-            (self.tab_titles.len() - 1).try_into().unwrap(),
+            (TabType::COUNT - 1).try_into().unwrap(),
         );
         self.update_tables();
     }
@@ -241,155 +275,104 @@ impl MainScreen {
     }
 
     fn remove_row(&mut self) {
-        if self.selected_tab != 2 {
-            return;
-        }
-        let pl_id = self
-            .playlists
-            .as_ref()
-            .unwrap()
-            .get(self.pl_table.selected_row())
-            .unwrap()
-            .id;
-        match self.mode {
-            false => {
-                let _ = self.sender.send(AppEvent::RemovePlaylist((pl_id, false)));
-            }
-            true => {
-                let track_id = self
-                    .playlists
-                    .as_ref()
-                    .unwrap()
-                    .get(self.pl_table.selected_row())
-                    .unwrap()
-                    .tracks
-                    .get(self.song_table.selected_row())
-                    .unwrap()
-                    .data
-                    .unique_id;
+        if let Some(TabContent::Playlists(playlists)) =
+            self.tab_content.get(&TabType::from(self.selected_tab))
+        {
+            let pl_id = playlists.get(self.pl_table.selected_row()).unwrap().id;
+            match self.mode {
+                false => {
+                    let _ = self.sender.send(AppEvent::RemovePlaylist((pl_id, false)));
+                }
+                true => {
+                    let track_id = playlists
+                        .get(self.pl_table.selected_row())
+                        .unwrap()
+                        .tracks
+                        .get(self.song_table.selected_row())
+                        .unwrap()
+                        .data
+                        .unique_id;
 
-                let _ = self
-                    .sender
-                    .send(AppEvent::RemoveTrackFromPlaylist((track_id, pl_id)));
+                    let _ = self
+                        .sender
+                        .send(AppEvent::RemoveTrackFromPlaylist((track_id, pl_id)));
+                }
             }
         }
     }
 
     fn remove_completely(&mut self) {
-        if self.selected_tab != 2 {
-            return;
-        }
-        match self.mode {
-            false => {
-                let pl_id = self
-                    .playlists
-                    .as_ref()
-                    .unwrap()
-                    .get(self.pl_table.selected_row())
-                    .unwrap()
-                    .id;
+        if let Some(TabContent::Playlists(playlists)) =
+            self.tab_content.get(&TabType::from(self.selected_tab))
+        {
+            match self.mode {
+                false => {
+                    let pl_id = playlists.get(self.pl_table.selected_row()).unwrap().id;
 
-                let _ = self.sender.send(AppEvent::RemovePlaylist((pl_id, true)));
-            }
-            true => {
-                let track = self
-                    .playlists
-                    .as_ref()
-                    .unwrap()
-                    .get(self.pl_table.selected_row())
-                    .unwrap()
-                    .tracks
-                    .get(self.song_table.selected_row())
-                    .unwrap()
-                    .clone();
-                let _ = self
-                    .sender
-                    .send(AppEvent::RemoveTrack(track.data.unique_id));
+                    let _ = self.sender.send(AppEvent::RemovePlaylist((pl_id, true)));
+                }
+                true => {
+                    let track = playlists
+                        .get(self.pl_table.selected_row())
+                        .unwrap()
+                        .tracks
+                        .get(self.song_table.selected_row())
+                        .unwrap()
+                        .clone();
+                    let _ = self
+                        .sender
+                        .send(AppEvent::RemoveTrack(track.data.unique_id));
+                }
             }
         }
     }
 
     fn download_row(&mut self) {
-        match self.selected_tab {
-            0 => {
-                // YT
-                match self.mode {
-                    false => {
-                        let playlist = self
-                            .youtube
-                            .as_ref()
-                            .unwrap()
-                            .get(self.pl_table.selected_row())
-                            .unwrap()
-                            .clone();
+        match self.tab_content.get(&TabType::from(self.selected_tab)) {
+            Some(TabContent::Youtube(youtube)) => match self.mode {
+                false => {
+                    let playlist = youtube.get(self.pl_table.selected_row()).unwrap().clone();
 
-                        let _ = self.sender.send(AppEvent::DownloadYTPlaylist(playlist));
-                    }
-                    true => {
-                        let track = self
-                            .youtube
-                            .as_ref()
-                            .unwrap()
-                            .get(self.pl_table.selected_row())
-                            .unwrap()
-                            .videos
-                            .get(self.song_table.selected_row())
-                            .unwrap()
-                            .clone();
+                    let _ = self.sender.send(AppEvent::DownloadYTPlaylist(playlist));
+                }
+                true => {
+                    let track = youtube
+                        .get(self.pl_table.selected_row())
+                        .unwrap()
+                        .videos
+                        .get(self.song_table.selected_row())
+                        .unwrap()
+                        .clone();
 
-                        let _ = self.sender.send(AppEvent::DownloadYTTrack(track));
-                    }
+                    let _ = self.sender.send(AppEvent::DownloadYTTrack(track));
                 }
-            }
-            1 => {
-                // SC
-                match self.mode {
-                    false => {
-                        let playlist = self
-                            .soundcloud
-                            .as_ref()
-                            .unwrap()
-                            .get(self.pl_table.selected_row())
-                            .unwrap()
-                            .clone();
-                        let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist));
-                    }
-                    true => {
-                        let track = self
-                            .soundcloud
-                            .as_ref()
-                            .unwrap()
-                            .get(self.pl_table.selected_row())
-                            .unwrap()
-                            .tracks
-                            .get(self.song_table.selected_row())
-                            .unwrap()
-                            .clone();
-                        let _ = self.sender.send(AppEvent::DownloadTrack(track));
-                    }
+            },
+            Some(TabContent::SoundCloud(soundcloud)) => match self.mode {
+                false => {
+                    let playlist = soundcloud
+                        .get(self.pl_table.selected_row())
+                        .unwrap()
+                        .clone();
+                    let _ = self.sender.send(AppEvent::DownloadPlaylist(playlist));
                 }
-            }
+                true => {
+                    let track = soundcloud
+                        .get(self.pl_table.selected_row())
+                        .unwrap()
+                        .tracks
+                        .get(self.song_table.selected_row())
+                        .unwrap()
+                        .clone();
+                    let _ = self.sender.send(AppEvent::DownloadTrack(track));
+                }
+            },
             _ => {}
         }
     }
 
-    pub fn set_youtube_playlists(&mut self, pls: Vec<YTPlaylist>) {
-        self.youtube = Some(pls);
-        if self.selected_tab == 0 {
-            self.update_tables();
-        }
-    }
-
-    pub fn set_soundcloud_playlists(&mut self, pl: CloudPlaylists) {
-        self.soundcloud = Some(pl.collection);
-        if self.selected_tab == 1 {
-            self.update_tables();
-        }
-    }
-
-    pub fn set_itunes(&mut self, pl: Vec<DBPlaylist>) {
-        self.playlists = Some(pl);
-        if self.selected_tab == 2 {
+    pub fn set_playlists(&mut self, tab: TabType, content: TabContent) {
+        self.tab_content.insert(tab, content);
+        if TabType::from(self.selected_tab) == tab {
             self.update_tables();
         }
     }
@@ -412,68 +395,52 @@ impl MainScreen {
             .to_vec(),
         );
 
-        let data = match self.selected_tab {
-            0 => {
-                if let Some(yt) = &self.youtube {
-                    yt.iter()
-                        .map(|playlist| {
-                            vec![
-                                0.to_string(),
-                                playlist.title.clone(),
-                                [playlist.videos.len().to_string(), " songs".to_string()].concat(),
-                                String::new(),
-                                "NO".to_string(),
-                            ]
-                        })
-                        .collect::<Vec<Vec<String>>>()
-                } else {
-                    Vec::new()
-                }
-            }
-            1 => {
-                if let Some(sc) = &self.soundcloud {
-                    sc.iter()
-                        .map(|playlist| {
-                            let date: DateTime<Utc> = playlist.created_at.parse().unwrap();
-                            vec![
-                                playlist.id.to_string(),
-                                playlist.title.clone(),
-                                [playlist.track_count.to_string(), " songs".to_string()].concat(),
-                                format!("{}", date.format("%Y-%m-%d %H:%M")),
-                                "NO".to_string(),
-                            ]
-                        })
-                        .collect::<Vec<Vec<String>>>()
-                } else {
-                    Vec::new()
-                }
-            }
-            2 => {
-                if let Some(it) = &self.playlists {
-                    it.iter()
-                        .map(|playlist| {
-                            let date = Utc.timestamp_millis_opt(playlist.timestamp as i64).unwrap();
-                            vec![
-                                playlist.id.to_string(),
-                                playlist.title.clone(),
-                                playlist.tracks.len().to_string(),
-                                format!("{}", date.format("%Y-%m-%d %H:%M")),
-                                "YES".to_string(),
-                            ]
-                        })
-                        .collect::<Vec<Vec<String>>>()
-                } else {
-                    Vec::new()
-                }
-            }
-            _ => {
-                self.pl_table = SmartTable::default();
-                Vec::new()
-            }
-        };
-        self.pl_table.set_data(data);
-        self.pl_table.set_title("Playlists".to_string());
-        self.update_songs();
+        if let Some(content) = self.tab_content.get(&TabType::from(self.selected_tab)) {
+            let data = match content {
+                TabContent::Youtube(yt) => yt
+                    .iter()
+                    .map(|playlist| {
+                        vec![
+                            0.to_string(),
+                            playlist.title.clone(),
+                            [playlist.videos.len().to_string(), " songs".to_string()].concat(),
+                            String::new(),
+                            "NO".to_string(),
+                        ]
+                    })
+                    .collect::<Vec<Vec<String>>>(),
+                TabContent::SoundCloud(sc) => sc
+                    .iter()
+                    .map(|playlist| {
+                        let date: DateTime<Utc> = playlist.created_at.parse().unwrap();
+                        vec![
+                            playlist.id.to_string(),
+                            playlist.title.clone(),
+                            [playlist.track_count.to_string(), " songs".to_string()].concat(),
+                            format!("{}", date.format("%Y-%m-%d %H:%M")),
+                            "NO".to_string(),
+                        ]
+                    })
+                    .collect::<Vec<Vec<String>>>(),
+                TabContent::Playlists(it) => it
+                    .iter()
+                    .map(|playlist| {
+                        let date = Utc.timestamp_millis_opt(playlist.timestamp as i64).unwrap();
+                        vec![
+                            playlist.id.to_string(),
+                            playlist.title.clone(),
+                            playlist.tracks.len().to_string(),
+                            format!("{}", date.format("%Y-%m-%d %H:%M")),
+                            "YES".to_string(),
+                        ]
+                    })
+                    .collect::<Vec<Vec<String>>>(),
+            };
+
+            self.pl_table.set_data(data);
+            self.pl_table.set_title("Playlists".to_string());
+            self.update_songs();
+        }
     }
 
     fn update_songs(&mut self) {
@@ -486,8 +453,8 @@ impl MainScreen {
         ]
         .to_vec();
 
-        match self.selected_tab {
-            0 => {
+        match self.tab_content.get(&TabType::from(self.selected_tab)) {
+            Some(TabContent::Youtube(pls)) => {
                 self.song_table = SmartTable::new(
                     ["Id", "Title", "Artist", "Duration", ""]
                         .iter_mut()
@@ -495,30 +462,28 @@ impl MainScreen {
                         .collect(),
                     constraints,
                 );
-                self.set_mode(self.mode);
 
-                if let Some(pls) = &self.youtube {
-                    if let Some(ypl) = &pls.get(self.pl_table.selected_row()) {
-                        let y = ypl.videos.clone();
-                        let data = y
-                            .iter()
-                            .map(|video| {
-                                vec![
-                                    video.videoId.clone(),
-                                    video.title.clone(),
-                                    video.publisher.clone(),
-                                    video.lengthSeconds.to_string(),
-                                    String::new(),
-                                ]
-                            })
-                            .collect::<Vec<Vec<String>>>();
+                if let Some(ypl) = &pls.get(self.pl_table.selected_row()) {
+                    let y = ypl.videos.clone();
+                    let data = y
+                        .iter()
+                        .map(|video| {
+                            vec![
+                                video.videoId.clone(),
+                                video.title.clone(),
+                                video.publisher.clone(),
+                                video.lengthSeconds.to_string(),
+                                String::new(),
+                            ]
+                        })
+                        .collect::<Vec<Vec<String>>>();
 
-                        self.song_table.set_data(data);
-                    }
+                    self.song_table.set_data(data);
                 }
+
                 self.song_table.set_title(" Songs ".to_string());
             }
-            1 => {
+            Some(TabContent::SoundCloud(pls)) => {
                 self.song_table = SmartTable::new(
                     ["Id", "Title", "Artist", "Duration", "Genre"]
                         .iter_mut()
@@ -526,33 +491,31 @@ impl MainScreen {
                         .collect(),
                     constraints,
                 );
-                self.set_mode(self.mode);
 
-                if let Some(pls) = &self.soundcloud {
-                    let s = &pls.get(self.pl_table.selected_row()).unwrap().tracks;
-                    let data = s
-                        .iter()
-                        .map(|track| {
-                            vec![
-                                track.id.to_string(),
-                                track.title.as_deref().unwrap().to_string(),
-                                track
-                                    .user
-                                    .clone()
-                                    .unwrap()
-                                    .username
-                                    .unwrap_or(track.user.as_ref().unwrap().permalink.clone()),
-                                track.duration.unwrap_or(0).to_string(),
-                                track.genre.as_ref().unwrap_or(&String::new()).to_string(),
-                            ]
-                        })
-                        .collect::<Vec<Vec<String>>>();
+                let s = &pls.get(self.pl_table.selected_row()).unwrap().tracks;
+                let data = s
+                    .iter()
+                    .map(|track| {
+                        vec![
+                            track.id.to_string(),
+                            track.title.as_deref().unwrap().to_string(),
+                            track
+                                .user
+                                .clone()
+                                .unwrap()
+                                .username
+                                .unwrap_or(track.user.as_ref().unwrap().permalink.clone()),
+                            track.duration.unwrap_or(0).to_string(),
+                            track.genre.as_ref().unwrap_or(&String::new()).to_string(),
+                        ]
+                    })
+                    .collect::<Vec<Vec<String>>>();
 
-                    self.song_table.set_data(data);
-                }
+                self.song_table.set_data(data);
+
                 self.song_table.set_title(" Songs ".to_string());
             }
-            2 => {
+            Some(TabContent::Playlists(pls)) => {
                 self.song_table = SmartTable::new(
                     ["Id", "Title", "Artist", "Bitrate", "Genre"]
                         .iter_mut()
@@ -560,33 +523,30 @@ impl MainScreen {
                         .collect(),
                     constraints,
                 );
-                self.set_mode(self.mode);
 
-                if let Some(pls) = &self.playlists {
-                    let s = &pls.get(self.pl_table.selected_row()).unwrap().tracks;
-                    let data = s
-                        .iter()
-                        .map(|track| {
-                            vec![
-                                track.data.unique_id.to_string(),
-                                track.get_title(),
-                                track.get_artist(),
-                                track.data.bitrate.to_string(),
-                                track.get_genre(),
-                            ]
-                        })
-                        .collect::<Vec<Vec<String>>>();
+                let s = &pls.get(self.pl_table.selected_row()).unwrap().tracks;
+                let data = s
+                    .iter()
+                    .map(|track| {
+                        vec![
+                            track.data.unique_id.to_string(),
+                            track.get_title(),
+                            track.get_artist(),
+                            track.data.bitrate.to_string(),
+                            track.get_genre(),
+                        ]
+                    })
+                    .collect::<Vec<Vec<String>>>();
 
-                    self.song_table.set_data(data);
-                }
+                self.song_table.set_data(data);
 
                 self.song_table.set_title(" Songs ".to_string());
             }
             _ => {
                 self.song_table = SmartTable::default();
-                self.set_mode(self.mode);
             }
         }
+        self.set_mode(self.mode);
     }
 
     fn render_tab(&self, frame: &mut Frame, area: Rect) {

@@ -30,7 +30,7 @@ impl AppScreen for LoadingScreen {
         self.render_progress(frame, chunks[0]);
 
         // Render Status Bar
-        let status_bar = Paragraph::new(Line::from(vec!["<Q> QUIT".bold()])).centered();
+        let status_bar = Paragraph::new(Line::from(vec!["<F10> QUIT".bold()])).centered();
         frame.render_widget(status_bar, chunks[1]); // Render into third chunk
     }
 

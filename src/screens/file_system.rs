@@ -78,7 +78,7 @@ impl AppScreen for FileSystem {
         match key_event.code {
             KeyCode::Up => self.table.previous_row(),
             KeyCode::Down => self.table.next_row(),
-            KeyCode::F(4) => {
+            KeyCode::Esc => {
                 let _ = self
                     .sender
                     .send(AppEvent::SwitchScreen(AppState::MainScreen));
@@ -103,13 +103,13 @@ impl AppScreen for FileSystem {
 
         // Render Status Bar
         let status_bar = Paragraph::new(Line::from(vec![
-            "<F4> SWITCH TO NORMAL".bold(),
+            "<ESC> GO BACK".bold(),
             " | ".dark_gray(),
             "<F5> SAVE AS IS".bold(),
             " | ".dark_gray(),
             "<F6> SAVE AS PLAYLIST".bold(),
             " | ".dark_gray(),
-            "<Q> QUIT".bold(),
+            "<F10> QUIT".bold(),
         ]))
         .centered();
         frame.render_widget(status_bar, chunks[1]); // Render into third chunk
