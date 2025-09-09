@@ -439,8 +439,8 @@ impl MainScreen {
 
             self.pl_table.set_data(data);
             self.pl_table.set_title("Playlists".to_string());
-            self.update_songs();
         }
+        self.update_songs();
     }
 
     fn update_songs(&mut self) {
