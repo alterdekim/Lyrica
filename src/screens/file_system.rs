@@ -3,6 +3,7 @@ use crate::sync::sync_util::AppEvent;
 use crate::{screens::AppScreen, AppState};
 use chrono::{DateTime, Utc};
 use crossterm::event::KeyCode;
+use crossterm::event::KeyEventKind::Press;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Line, Stylize};
 use ratatui::widgets::Paragraph;
@@ -75,6 +76,9 @@ fn list_files_recursively(p: PathBuf) -> Vec<PathBuf> {
 
 impl AppScreen for FileSystem {
     fn handle_key_event(&mut self, key_event: crossterm::event::KeyEvent) {
+        if key_event.kind != Press {
+            return;
+        }
         match key_event.code {
             KeyCode::Up => self.table.previous_row(),
             KeyCode::Down => self.table.next_row(),

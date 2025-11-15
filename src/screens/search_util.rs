@@ -2,6 +2,7 @@ use crate::component::table::SmartTable;
 use crate::screens::AppScreen;
 use crate::sync::sync_util::AppEvent;
 use crate::AppState;
+use crossterm::event::KeyEventKind::Press;
 use crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Line, Stylize};
@@ -35,6 +36,9 @@ pub struct SearchScreen {
 
 impl AppScreen for SearchScreen {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
+        if key_event.kind != Press {
+            return;
+        }
         match key_event.code {
             KeyCode::Up => self.table.previous_row(),
             KeyCode::Down => self.table.next_row(),

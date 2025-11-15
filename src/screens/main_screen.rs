@@ -1,6 +1,8 @@
 use chrono::{DateTime, TimeZone, Utc};
-use crossterm::event::{KeyCode, KeyEvent};
-use ratatui::widgets::Clear;
+use crossterm::event::KeyEventKind::Press;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::layout::Position;
+use ratatui::text::Text;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style, Stylize},
@@ -25,18 +27,36 @@ pub struct MainScreen {
     song_table: SmartTable,
     tab_content: HashMap<TabType, TabContent>,
     sender: UnboundedSender<AppEvent>,
-    show_popup: bool,
     popup_input: String,
+    char_index: usize,
 }
 
 impl AppScreen for MainScreen {
     fn handle_key_event(&mut self, key_event: KeyEvent) {
+        if key_event.kind != Press {
+            return;
+        }
         match key_event.code {
-            KeyCode::Right => self.next_tab(),
-            KeyCode::Left => self.previous_tab(),
+            KeyCode::Right => {
+                if key_event.modifiers.contains(KeyModifiers::SHIFT) {
+                    if self.char_index < self.popup_input.len() {
+                        self.char_index += 1;
+                    }
+                } else {
+                    self.next_tab()
+                }
+            }
+            KeyCode::Left => {
+                if key_event.modifiers.contains(KeyModifiers::SHIFT) {
+                    if self.char_index > 0 {
+                        self.char_index -= 1;
+                    }
+                } else {
+                    self.previous_tab()
+                }
+            }
             KeyCode::Up => self.previous_row(),
             KeyCode::Down => self.next_row(),
-            KeyCode::F(2) => self.search_popup(),
             KeyCode::F(5) => self.download_row(),
             KeyCode::F(8) => self.remove_row(),
             KeyCode::F(9) => self.remove_completely(),
@@ -47,29 +67,25 @@ impl AppScreen for MainScreen {
                     .send(AppEvent::SwitchScreen(AppState::FileSystem));
             }
             KeyCode::Char(c) => {
-                if self.show_popup && (c.is_alphanumeric() || c.is_ascii_whitespace()) {
-                    self.popup_input.push(c);
-                }
+                self.popup_input.insert(self.char_index, c);
+                self.char_index += 1;
             }
             KeyCode::Esc => {
-                if self.show_popup {
-                    self.show_popup = false;
-                    self.popup_input = String::default();
-                }
+                self.popup_input = String::default();
+                self.char_index = 0;
             }
             KeyCode::Backspace => {
-                if self.show_popup {
-                    self.popup_input.pop();
+                if !self.popup_input.is_empty() && self.char_index > 0 {
+                    self.char_index -= 1;
+                    self.popup_input.remove(self.char_index);
                 }
             }
             KeyCode::Enter => {
-                if self.show_popup {
-                    self.show_popup = false;
-                    let _ = self
-                        .sender
-                        .send(AppEvent::SearchFor(self.popup_input.clone()));
-                    self.popup_input = String::default();
-                }
+                let _ = self
+                    .sender
+                    .send(AppEvent::SearchFor(self.popup_input.clone()));
+                self.popup_input = String::default();
+                self.char_index = 0;
             }
             _ => {}
         }
@@ -84,6 +100,7 @@ impl AppScreen for MainScreen {
                 Constraint::Length(3), // Tabs
                 Constraint::Min(0),    // Main content area
                 Constraint::Length(1), // Status bar
+                Constraint::Length(1),
             ])
             .split(frame.area());
 
@@ -109,8 +126,6 @@ impl AppScreen for MainScreen {
         let status_bar = Paragraph::new(Line::from(match TabType::from(self.selected_tab) {
             TabType::Youtube | TabType::Soundcloud => {
                 vec![
-                    "<F2> SEARCH".bold(),
-                    " | ".dark_gray(),
                     "<F4> IMPORT".bold(),
                     " | ".dark_gray(),
                     "<F5> DOWNLOAD".bold(),
@@ -120,8 +135,6 @@ impl AppScreen for MainScreen {
             }
             TabType::Playlists => {
                 vec![
-                    "<F2> SEARCH".bold(),
-                    " | ".dark_gray(),
                     "<F4> IMPORT".bold(),
                     " | ".dark_gray(),
                     "<F8> REMOVE".bold(),
@@ -133,27 +146,23 @@ impl AppScreen for MainScreen {
             }
         }))
         .centered();
-        frame.render_widget(status_bar, chunks[2]);
 
-        if self.show_popup {
-            // Get a centered rect (50% width, 30% height)
-            let popup_area = util::centered_rect(30, 10, size);
+        let input_text = Paragraph::new(
+            Text::from(Line::from(vec![
+                "Search>".bold().into(),
+                self.popup_input.clone().into(),
+            ]))
+            .patch_style(Style::default().add_modifier(Modifier::RAPID_BLINK)),
+        );
 
-            // Clear background behind the popup
-            frame.render_widget(Clear, popup_area);
+        frame.render_widget(input_text, chunks[2]);
 
-            // Draw the popup block
-            let block = Block::default()
-                .title(" Search ")
-                .borders(Borders::ALL)
-                .border_type(ratatui::widgets::BorderType::Rounded);
-            let inner = block.inner(popup_area);
-            frame.render_widget(block, popup_area);
+        frame.set_cursor_position(Position::new(
+            chunks[2].x + (self.char_index as u16) + 7,
+            chunks[2].y,
+        ));
 
-            // Example: input field
-            let paragraph = Paragraph::new(self.popup_input.as_str());
-            frame.render_widget(paragraph, inner);
-        }
+        frame.render_widget(status_bar, chunks[3]);
     }
 
     fn as_any(&mut self) -> &mut dyn std::any::Any {
@@ -169,18 +178,14 @@ impl MainScreen {
             song_table: SmartTable::default(),
             selected_tab: 0,
             sender,
-            show_popup: false,
             popup_input: String::default(),
             tab_content: HashMap::new(),
+            char_index: 0,
         }
     }
 
     fn switch_mode(&mut self) {
         self.set_mode(!self.mode);
-    }
-
-    fn search_popup(&mut self) {
-        self.show_popup = true;
     }
 
     fn set_mode(&mut self, mode: bool) {

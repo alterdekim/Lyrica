@@ -1,5 +1,6 @@
 use crate::screens::main_screen::util::{TabContent, TabType};
 use color_eyre::Result;
+use crossterm::event::KeyEventKind::Press;
 use crossterm::{
     event::{
         DisableMouseCapture, EnableMouseCapture, Event, EventStream, KeyCode, KeyEvent,
@@ -97,7 +98,7 @@ impl App {
         tokio::select! {
             Some(Ok(event)) = reader.next() => {
                 match event {
-                    Event::Key(key_event) if key_event.kind == KeyEventKind::Press => {
+                    Event::Key(key_event) if key_event.kind != KeyEventKind::Repeat => {
                         self.handle_key_event(key_event);
                     }
                     _ => {}
@@ -158,6 +159,9 @@ impl App {
             .get_mut(&self.state)
             .unwrap()
             .handle_key_event(key_event);
+        if key_event.kind != Press {
+            return;
+        }
         if let KeyCode::F(10) = key_event.code {
             self.exit()
         }
